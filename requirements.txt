@@ -1,0 +1,21 @@
+aenum>=3.1.15
+anyio>=4.9.0
+boto3>=1.37.17
+botocore>=1.35.99
+dataclasses-json>=0.6.7
+deepgram-sdk>=3.10.0
+deprecation>=2.1.0
+fastapi>=0.115.8
+httpcore>=1.0.7
+httpx>=0.28.1
+multidict>=6.2.0
+mypy-extensions>=1.0.0
+openai>=1.64.0
+python-dotenv>=1.0.1
+python-multipart>=0.0.20
+requests>=2.32.3
+tqdm>=4.67.1
+uvicorn>=0.34.0
+websockets>=15.0.1
+gunicorn
+cryptography == 45.0.2
