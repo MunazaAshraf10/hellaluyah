@@ -1518,7 +1518,6 @@ async def generate_template_report(
                 {"error": f"Transcript ID {transcript_id} not found"},
                 status_code=404
             )
-            
         transcript_item = response['Item']
         
         # Get transcript data
@@ -1531,7 +1530,7 @@ async def generate_template_report(
             transcript_data = transcript_data.decode('utf-8')
         elif isinstance(transcript_data, bytes):
             transcript_data = decrypt_data(transcript_data).decode('utf-8')
-
+        print(f"Transcript data: {transcript_data}")
         # Now parse the JSON
         try:
             transcription = json.loads(transcript_data)
@@ -1660,7 +1659,7 @@ async def live_transcription_endpoint(websocket: WebSocket):
             status="completed"
         )
         print(f"✅ Transcript saved to DynamoDB for client {client_id} with transcript_id: {transcript_id}")
-
+        print(f"Transcript data: {transcript_data}")
         # --- NEW: Send transcript_id to client ---
         await websocket.send_text(json.dumps({
             "type": "transcription_complete",
@@ -1752,6 +1751,25 @@ async def process_transcription_results(deepgram_socket, websocket, client_id):
                         
                         await websocket.send_text(json.dumps(message))
                         print("✅ Transcription sent to client")
+
+                        # Only process if it's a transcript
+                        if data.get("type") == "Results":
+                            # Extract the transcript text and speaker
+                            transcript_text = data["channel"]["alternatives"][0]["transcript"]
+                            speaker = data["channel"]["alternatives"][0].get("speaker", "Speaker 0")
+                            is_final = data.get("is_final", False)
+
+                            # Add to session data
+                            session_data = manager.get_session_data(client_id)
+                            if "transcription" not in session_data:
+                                session_data["transcription"] = {"conversation": []}
+                            if transcript_text.strip():
+                                session_data["transcription"]["conversation"].append({
+                                    "speaker": speaker,
+                                    "text": transcript_text,
+                                    "is_final": is_final
+                                })
+                            manager.update_session_data(client_id, session_data)
             except websockets.exceptions.ConnectionClosed:
                 print("❌ Deepgram connection closed")
                 break
