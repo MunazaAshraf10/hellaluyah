@@ -339,6 +339,68 @@ DETAILED_SOAP_NOTE_SCHEMA = {
     }
 }
 
+NEW_SOAP_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "subjective": {
+            "type": "object",
+            "properties": {
+                "reasons_and_complaints": {"type": "array", "items": {"type": "string"}},
+                "duration_details": {"type": "string"},
+                "modifying_factors": {"type": "string"},
+                "progression": {"type": "string"},
+                "previous_episodes": {"type": "string"},
+                "impact_on_daily_activities": {"type": "string"},
+                "associated_symptoms": {"type": "array", "items": {"type": "string"}}
+            }
+        },
+        "past_medical_history": {
+            "type": "object",
+            "properties": {
+                "contributing_factors": {"type": "string"},
+                "exposure_history": {"type": "string"},
+                "immunization_history": {"type": "string"},
+                "other_relevant_info": {"type": "string"}
+            }
+        },
+        "social_history": {"type": "string"},
+        "family_history": {"type": "string"},
+        "objective": {
+            "type": "object",
+            "properties": {
+                "vital_signs": {
+                    "type": "object",
+                    "properties": {
+                        "bp": {"type": "string"},
+                        "hr": {"type": "string"},
+                        "wt": {"type": "string"},
+                        "t": {"type": "string"},
+                        "o2": {"type": "string"},
+                        "ht": {"type": "string"}
+                    }
+                },
+                "physical_exam": {"type": "string"},
+                "investigations": {"type": "string"}
+            }
+        },
+        "assessment_plan": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "issue": {"type": "string"},
+                    "assessment": {"type": "string"},
+                    "differential_diagnosis": {"type": "array", "items": {"type": "string"}},
+                    "investigations": {"type": "array", "items": {"type": "string"}},
+                    "treatment": {"type": "array", "items": {"type": "string"}},
+                    "referrals": {"type": "array", "items": {"type": "string"}},
+                    "follow_up_plan": {"type": "string"}
+                }
+            }
+        }
+    }
+}
+
 SOAP_NOTE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1151,7 +1213,7 @@ async def upload_audio(
                 return JSONResponse({"error": error_msg}, status_code=400)
 
         # Validate template type
-        valid_templates = ["clinical_report", "detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note","meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes","pathology_note", "consult_note","discharge_summary","case_formulation"]
+        valid_templates = ["clinical_report", "new_soap_note","detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes", "pathology_note", "consult_note","discharge_summary","case_formulation"]
         main_logger.info(f"[REQ-{request_id}] Valid templates: {valid_templates}")
         main_logger.info(f"[REQ-{request_id}] Is template_type in valid_templates? {template_type in valid_templates}")
         
@@ -1503,7 +1565,7 @@ async def generate_template_report(
     """
     try:
         # Validate template type
-        valid_templates = ["clinical_report", "detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes","pathology_note", "consult_note","discharge_summary","case_formulation"]
+        valid_templates = ["clinical_report","new_soap_note", "detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes","pathology_note", "consult_note","discharge_summary","case_formulation"]
         if template_type not in valid_templates:
             error_msg = f"Invalid template type '{template_type}'. Must be one of: {', '.join(valid_templates)}"
             error_logger.error(error_msg)
@@ -2689,6 +2751,215 @@ Format your response as a valid JSON object according to the clinical report sch
         - Be DIRECT and CONCISE in all documentation while preserving clinical accuracy
         - Always use "Client" instead of "Patient" throughout
         """
+        
+        elif template_type == "new_soap_note":
+            system_message = f"""You are an expert medical documentation specialist with extensive experience in clinical documentation. Your task is to create precise, professional SOAP notes from medical conversations that matches this schema {NEW_SOAP_SCHEMA} following these guidelines:
+
+        {preservation_instructions}
+        {grammar_instructions}
+
+
+        CORE PRINCIPLES:
+        - Extract information ONLY from the provided transcript/notes - never fabricate or assume details
+        - Use professional medical terminology and standard medical abbreviations
+        - Maintain clinical objectivity and conciseness
+        - Structure information logically within each section
+        - Leave sections blank if information is not explicitly mentioned
+        - Format vital signs using standard medical notation (e.g., "BP: 120/80 mmHg")
+        - DO not include the past medical history in the subjective section.
+        - Never add any information in the report that is not present in the transcript.
+        - Give intelligence to the doctor and make the report more informative and document all findings effectively.
+        - Dont include any information in the plan section that is not present in the transcript.
+        SECTION-SPECIFIC GUIDELINES:
+
+        SUBJECTIVE (S):
+        - Document chief complaints with precise onset, duration, and character
+        - Note modifying factors and temporal patterns
+        - Include relevant self-management attempts and their efficacy
+        - Document functional impact on ADLs/occupation
+        - List associated symptoms systematically
+        - For multiple complaints, enumerate each distinctly
+        - Use medical terminology (e.g., "dyspnea on exertion" rather than "shortness of breath with activity")
+        - Format subjective information in complete, professional sentences, with each point on a new line
+        
+        Example format:
+        . 46-year-old male with PMHx of mild asthma and T2DM presents with progressive respiratory symptoms over 1 week.
+        - Symptoms initially attributed to URI but have worsened over past 6 days.
+        - Primary symptoms include persistent cough productive of yellow-green sputum, dyspnea, and chest tightness.
+        - Associated symptoms include intermittent low-grade fever.
+        - Dyspnea significant with minimal exertion, leading to fatigue after walking few steps.
+        - Reports wheezing and chest heaviness; denies pleuritic chest pain.
+        - Recent exposure to URI from son last week; denies recent travel.
+        
+        Key formatting principles:
+        1. Begin with patient demographics 
+        2. Present symptoms in chronological order
+        3. Use precise medical terminology
+        4. Document pertinent positives and negatives
+        5. Include relevant exposures and risk factors
+        6. Maintain professional, concise language throughout
+        7. Past medical history should not be included in the subjective section as it has its own section.
+
+
+        PAST MEDICAL HISTORY (PMedHx):
+        - List relevant medical conditions, surgeries, and treatments
+        - Document pertinent negative findings
+        - Include immunization status if mentioned
+        - Note relevant investigations and their outcomes
+
+        SOCIAL HISTORY (SocHx):
+        - Document relevant lifestyle factors
+        - Include occupational exposures if pertinent
+        - Note substance use/habits
+        - Document living situation if relevant
+
+        FAMILY HISTORY (FHx):
+        - Document relevant hereditary conditions
+        - Include age of onset if mentioned
+        - Note pertinent negative findings
+
+        OBJECTIVE (O):
+        - Begin with general appearance (use "NAD" if appropriate)
+        - Format vital signs precisely:
+        BP: [value] mmHg
+        HR: [value] bpm
+        Wt: [value] kg
+        T: [value]°C
+        O2: [value]%
+        Ht: [value] cm
+        - Use standard normal exam phrases:
+        "N S1 and S2, no murmurs or extra beats"
+        "Resp: Chest clear, no decr breath sounds"
+        "No distension, BS+, soft, non-tender to palpation and percussion. No organomegaly"
+        - For psychiatric evaluations, include:
+        Appearance, speech, affect, perception, thought form/content, insight/judgment, cognition
+
+        ASSESSMENT/PLAN (A/P):
+        For each issue:
+        1. State the problem/condition concisely
+        2. Document assessment with likely diagnosis
+        3. List differential diagnoses in order of probability
+        4. Specify investigations with clear rationale
+        5. Detail treatment plan with specific interventions
+        6. Note relevant referrals and follow-up plans
+        7. Include the follow up plan in the plan section.
+        8. Dont include random investigations in the plan section, only include the investigations that are relevant to the issue and somewhat related to the discussion in the transcript.
+        9. For each issue, take separate Assessment, Differential diagnosis, Investigations planned, Treatment planned, Relevant referrals, Follow up plan, dont add them in the same issue.
+        10. Format assessment entries efficiently - avoid redundancy:
+        INCORRECT:
+        Issue: Acute bronchitis complicated by asthma and diabetes
+        Assessment: Likely diagnosis is acute bronchitis complicated by asthma and diabetes
+
+        CORRECT:
+        Issue: Acute bronchitis
+        Assessment: Complicated by underlying asthma and diabetes. Patient presents with...
+
+        FORMAT EACH ISSUE IN THE PLAN AS FOLLOWS:
+        1. [Problem/Condition]
+           Assessment: [Likely diagnosis]
+           Differential diagnosis: [List alternatives in order of probability]
+           Investigations planned: [List with rationale]
+           Treatment planned: [Specific interventions with dosages]
+           Relevant referrals: [Referrals with timeframes]
+           Follow up plan: [Follow up plan with timeframes]
+           
+        Example format:
+        1. Asthma exacerbation
+           Assessment: Likely diagnosis is asthma exacerbation
+           Differential diagnosis: COPD, bronchitis
+           Investigations planned: Spirometry, chest X-ray
+           Treatment planned: Prescribe inhaled corticosteroids and bronchodilators
+           Relevant referrals: Referral to pulmonologist for further evaluation
+           Follow up plan: Follow up in 2 weeks
+
+        2. Fatigue
+           Assessment: Likely diagnosis is related to asthma exacerbation
+           Differential diagnosis: Anemia, sleep apnea
+           Investigations planned: Complete blood count, sleep study
+           Treatment planned: Address underlying asthma exacerbation
+           Relevant referrals: None at this time
+           Follow up plan: Follow up in 4-5 days if not better
+
+        FORMATTING RULES:
+        - Use numerical ordering for multiple issues
+        - Maintain consistent indentation
+        - Use medical abbreviations appropriately
+        - Employ subheadings in Assessment/Plan sections
+        - Keep entries concise but complete
+
+        CRITICAL NOTES:
+        1. Never fabricate or assume information not present in the source material
+        2. Leave sections blank rather than noting "not mentioned" or "unknown"
+        3. Maintain professional medical tone throughout
+        4. Focus on clinically relevant information
+        5. Use standard medical terminology and phrasing
+        6. Recognize and document pertinent positive and negative findings
+        7. Interpret examination findings accurately based on clinical context
+        8. Structure differential diagnoses in order of clinical probability
+        9. Ensure treatment plans align with current medical standards
+        10. Maintain logical flow and clinical coherence throughout the note
+        11. CRITICAL FINDINGS: Document ALL abnormal vital signs, concerning symptoms, or red flags that require immediate clinical attention (e.g., "BP 180/110", "SpO2 88%", "Acute chest pain")
+        12. VITAL SIGNS: Always document complete set of vital signs with exact values:
+            - Blood Pressure (BP)
+            - Heart Rate (HR)
+            - Respiratory Rate (RR)
+            - Temperature (T)
+            - Oxygen Saturation (SpO2)
+            - Weight (Wt)
+            - Height (Ht)
+            - BMI if available
+        13. DIAGNOSTIC REASONING: For each diagnosis, document:
+            - Supporting clinical findings
+            - Relevant test results
+            - Clinical reasoning for diagnosis
+            - Severity assessment
+            - Disease staging if applicable
+        14. DIFFERENTIAL DIAGNOSIS: For each primary diagnosis, include:
+            - At least 2-3 alternative diagnoses
+            - Key distinguishing features
+            - Plan for ruling out each alternative
+        15. TREATMENT PLAN: Document comprehensively:
+            - Medications with exact dosing, frequency, duration
+            - Non-pharmacological interventions
+            - Patient education points
+            - Treatment goals and expected outcomes
+            - Monitoring parameters
+        16. PROGNOSIS: Include specific details about:
+            - Expected course of condition
+            - Timeline for improvement
+            - Potential complications
+            - Risk factors for poor outcomes
+            - Quality of life impact
+        17. FOLLOW-UP PLAN: Specify:
+            - Next appointment timing
+            - Monitoring requirements
+            - Trigger points for earlier review
+            - Specialty referrals with timeframes
+            - Care coordination plans
+        18. SELF-CARE PLAN: Document specific instructions for:
+            - Lifestyle modifications
+            - Diet and exercise recommendations
+            - Home monitoring requirements
+            - Warning signs to watch for
+            - Emergency action plans
+        19. STRESS MANAGEMENT: Include detailed strategies for:
+            - Stress reduction techniques
+            - Coping mechanisms
+            - Support resources
+            - Crisis management plan
+            - Mental health support options
+        20. INVESTIGATIONS: Document all tests with:
+            - Specific test names
+            - Timing requirements
+            - Preparation instructions
+            - Expected result timeframes
+            - Follow-up plan for results
+        21. Analyse the examination doctor is doing like open ur mouth, listen to ur heart, listen to ur lungs, etc. and document it in the note with what the examination is called and what were the findings.
+
+        Your output should reflect the highest standards of medical documentation, demonstrating clinical expertise while maintaining accuracy and relevance to the presented case. 
+        Always include all vital signs, immunization and family history, and provide more detailed diagnostic reasoning for precision.
+        ["The patient's temperature is 106°F, and the patient's oxygen saturation level is slightly low (94%), which are the critical findings that requires immediate attention."]"""
+                
         # Make the API request to GPT - Remove the response_format parameter which is causing the error
         response = client.chat.completions.create(
             model="gpt-4",
@@ -2746,6 +3017,8 @@ async def format_report(gpt_response, template_type):
             return await format_clinical_report(data)
         elif template_type == "soap_note":
             return await format_soap_note(data)
+        elif template_type == "new_soap_note":
+            return await format_new_soap(data)
         elif template_type == "progress_note":
             return await format_progress_note(data)
         elif template_type == "mental_health_appointment":
@@ -3334,7 +3607,7 @@ async def retry_report(report_id: str, template_type: str = None):
             )
         
         # Validate template type
-        valid_templates = ["clinical_report", "detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes", "pathology_note", "consult_note","discharge_summary","case_formulation"]
+        valid_templates = ["clinical_report", "new_soap_note","detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes", "pathology_note", "consult_note","discharge_summary","case_formulation"]
         if template_type not in valid_templates:
             error_msg = f"Invalid template type '{template_type}'. Must be one of: {', '.join(valid_templates)}"
             return JSONResponse({"error": error_msg}, status_code=400)
@@ -3808,7 +4081,169 @@ async def format_soap_note(gpt_response):
     except Exception as e:
         error_logger.error(f"Error formatting SOAP note: {str(e)}", exc_info=True)
         return f"Error formatting SOAP note: {str(e)}"
+
+
+async def format_new_soap(gpt_response):
+    """
+    Format a new SOAP note from GPT structured response based on NEW_SOAP_SCHEMA.
+    
+    Args:
+        gpt_response: Dictionary containing the structured SOAP note data
         
+    Returns:
+        Formatted string containing the human-readable SOAP note
+    """
+    try:
+        note = []
+        
+        # Add heading
+        note.append("# SOAP NOTE\n")
+        
+        # SUBJECTIVE
+        note.append("## SUBJECTIVE")
+        subjective = gpt_response.get("subjective", {})
+        
+        # Add each subjective component on a new line with bullet points
+        
+        # Reasons and Complaints
+        if subjective.get("reasons_and_complaints"):
+            complaints = ", ".join(subjective["reasons_and_complaints"])
+            note.append(f"- Patient presents with {complaints}.")
+        
+        # Duration Details
+        if subjective.get("duration_details"):
+            note.append(f"- {subjective['duration_details']}")
+        
+        # Modifying Factors
+        if subjective.get("modifying_factors"):
+            note.append(f"- {subjective['modifying_factors']}")
+        
+        # Progression
+        if subjective.get("progression"):
+            note.append(f"- {subjective['progression']}")
+        
+        # Previous Episodes
+        if subjective.get("previous_episodes"):
+            note.append(f"- {subjective['previous_episodes']}")
+        
+        # Impact on Daily Activities
+        if subjective.get("impact_on_daily_activities"):
+            note.append(f"- {subjective['impact_on_daily_activities']}")
+        
+        # Associated Symptoms
+        if subjective.get("associated_symptoms"):
+            symptoms = ", ".join(subjective["associated_symptoms"])
+            note.append(f"- Associated symptoms include {symptoms}.")
+        
+        note.append("")
+        
+        # PAST MEDICAL HISTORY
+        note.append("## PAST MEDICAL HISTORY")
+        pmh = gpt_response.get("past_medical_history", {})
+        
+        # Add all PMH items as bullet points
+        if pmh.get("contributing_factors"):
+            note.append(f"- {pmh['contributing_factors']}")
+            
+        if pmh.get("exposure_history"):
+            note.append(f"- {pmh['exposure_history']}")
+            
+        if pmh.get("immunization_history"):
+            note.append(f"- {pmh['immunization_history']}")
+            
+        if pmh.get("other_relevant_info"):
+            note.append(f"- {pmh['other_relevant_info']}")
+            
+        note.append("")
+        
+        # SOCIAL HISTORY
+        if gpt_response.get("social_history"):
+            note.append("## SOCIAL HISTORY")
+            note.append(gpt_response["social_history"])
+            note.append("")
+            
+        # FAMILY HISTORY
+        if gpt_response.get("family_history"):
+            note.append("## FAMILY HISTORY")
+            note.append(gpt_response["family_history"])
+            note.append("")
+            
+        # OBJECTIVE
+        note.append("## OBJECTIVE")
+        objective = gpt_response.get("objective", {})
+        
+        # Vital Signs
+        vital_signs = objective.get("vital_signs", {})
+        if any(vital_signs.values()):
+            note.append("### Vital Signs:")
+            vital_sign_labels = {
+                "bp": "Blood Pressure",
+                "hr": "Heart Rate",
+                "wt": "Weight",
+                "t": "Temperature",
+                "o2": "O2 Saturation",
+                "ht": "Height"
+            }
+            for key, label in vital_sign_labels.items():
+                if vital_signs.get(key):
+                    note.append(f"- {label}: {vital_signs[key]}")
+            note.append("")
+            
+        # Physical Exam
+        if objective.get("physical_exam"):
+            note.append("### Physical Examination:")
+            note.append(objective["physical_exam"])
+            note.append("")
+            
+        # Investigations
+        if objective.get("investigations"):
+            note.append("### Investigations:")
+            note.append(objective["investigations"])
+            note.append("")
+            
+        # ASSESSMENT & PLAN
+        note.append("## ASSESSMENT & PLAN")
+        assessment_plan = gpt_response.get("assessment_plan", [])
+        
+        for i, issue in enumerate(assessment_plan, 1):
+            if issue.get("issue"):
+                note.append(f"\n### {i}. {issue['issue']}")
+                
+                if issue.get("assessment"):
+                    note.append(f"\nAssessment: {issue['assessment']}")
+                    
+                if issue.get("differential_diagnosis"):
+                    note.append("\nDifferential Diagnosis:")
+                    for dx in issue["differential_diagnosis"]:
+                        note.append(f"- {dx}")
+                        
+                if issue.get("investigations"):
+                    note.append("\nInvestigations Planned:")
+                    for investigation in issue["investigations"]:
+                        note.append(f"- {investigation}")
+                        
+                if issue.get("treatment"):
+                    note.append("\nTreatment:")
+                    for treatment in issue["treatment"]:
+                        note.append(f"- {treatment}")
+                        
+                if issue.get("referrals"):
+                    note.append("\nReferrals:")
+                    for referral in issue["referrals"]:
+                        note.append(f"- {referral}")
+                        
+                if issue.get("follow_up_plan"):
+                    note.append("\nFollow-up Plan:")
+                    note.append(f"- {issue['follow_up_plan']}")
+                        
+                note.append("")
+        
+        return "\n".join(note)
+    except Exception as e:
+        error_logger.error(f"Error formatting new SOAP note: {str(e)}", exc_info=True)
+        return f"Error formatting new SOAP note: {str(e)}"
+
+
 async def format_progress_note(data):
     """
     Format a progress note from GPT structured response.
@@ -6336,3 +6771,7 @@ async def dynamodb_scan_all(table, **kwargs):
         if not last_evaluated_key:
             break
     return items
+
+
+
+
