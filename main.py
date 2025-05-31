@@ -2877,7 +2877,9 @@ Format your response as a valid JSON object according to the clinical report sch
             For time references (e.g., “this morning,” “last Wednesday”), convert to specific dates based on today’s date, June 1, 2025 (Sunday). For example, “this morning” is June 1, 2025; “last Wednesday” is May 28, 2025; “a week ago” is May 25, 2025
             Include the all numbers in numeric format.
             Make sure the output is concise and to the point.
-            Ensure that each point of S, PMedHx, SocHx, FHx, O starts with "- ", but for assesment it should not, just point them nicely and concisely.
+            Ensure that each point of S, PMedHx, SocHx, FHx, O starts with "- ", but for A/P it should not, just point them nicely and concisely.
+            A/P should always have sub headings and should be concise.
+            ENsure the data in S, PMedHx, SocHx, FHx, O, A/P should be concise to the point and professional.
             Below is the transcript:\n\n{conversation_text}"""
             
             
