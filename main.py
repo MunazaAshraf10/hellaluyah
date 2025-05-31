@@ -2588,55 +2588,169 @@ Format your response as a valid JSON object according to the clinical report sch
         """
         
         elif template_type == "detailed_soap_note":
-                    system_message = f"""You are a medical documentation expert specializing in detailed SOAP notes. 
-        {preservation_instructions}
-        {grammar_instructions}
+            user_instructions = f"""You are provided with a medical conversation transcript. 
+                Analyze the transcript and generate a structured SOAP note following the specified template. 
+                Use only the information explicitly provided in the transcript, and do not include or assume any additional details. 
+                Ensure the output is a plain-text SOAP note, formatted professionally and concisely in a doctor-like tone with headers, hypen lists, and narrative sections as specified. 
+                Group related chief complaints (e.g., chest pain and palpitations) into a single issue in the Assessment section when they share a likely etiology, unless the transcript clearly indicates separate issues. 
+                For time references (e.g., 'this morning,' 'last Wednesday'), convert to specific dates based on today’s date, June 1, 2025 (Sunday). For example, 'this morning' is June 1, 2025; 'last Wednesday' is May 28, 2025; 'a week ago' is May 25, 2025. 
+                Include all numbers in numeric format (e.g., '20 mg' instead of 'twenty mg'). 
+                Leave sections or subsections blank if no relevant information is provided, omitting optional subsections (e.g., Diagnostic Tests) if not mentioned. 
+                Make sure that output is in json format.
+                Below is the transcript:\n\n{conversation_text}"""
 
-        CRITICAL STYLE INSTRUCTIONS:
-        1. Be CONCISE and DIRECT in your documentation (e.g., "Lost 2kg in 3 weeks" NOT "The patient reported that they have lost two kilograms over the past three weeks")
-        2. Use medical shorthand where appropriate (e.g., "BP 120/80" instead of "Blood pressure is 120/80")
-        3. Format all information in BULLET POINT style
-        4. Focus on capturing critical details using the fewest words necessary
-        5. Use medical terminology that healthcare professionals would use
-        6. NEVER create or invent information not explicitly mentioned in the transcript
+            system_message = f"""You are a highly skilled medical professional tasked with analyzing a provided medical transcription, contextual notes, or clinical note to generate a concise, well-structured SOAP note in plain-text format, following the specified template. Use only the information explicitly provided in the input, leaving placeholders or sections blank if no relevant data is mentioned. Do not include or assume any details not explicitly stated, and do not note that information is missing. Write in a professional, doctor-like tone, keeping phrasing succinct and clear. Group related chief complaints (e.g., shortness of breath and orthopnea) into a single issue in the Assessment section when they share a likely etiology, unless the input clearly indicates separate issues. Convert vague time references (e.g., “this morning,” “last Wednesday”) to specific dates based on today’s date, June 1, 2025 (Sunday). For example, “this morning” is June 1, 2025; “last Wednesday” is May 28, 2025; “a week ago” is May 25, 2025. Ensure the output is formatted for readability with consistent indentation, hyphens for bulleted lists, and blank lines between sections.
 
-        When formatting the provided medical conversation, structure it according to the SOAP format:
+                {preservation_instructions} {grammar_instructions}
 
-        Format your response as a valid JSON object according to this schema:
-        {{
-        "subjective": {{
-            "current_issues": "CONCISE string describing presenting complaints WITH EXACT TIMELINE",
-            "past_medical_history": "CONCISE string with past medical conditions and surgeries",
-            "medications": "CONCISE list of ALL medications with EXACT dosages and frequency",
-            "social_history": "CONCISE string with lifestyle factors, occupation, and habits",
-            "allergies": "CONCISE string with any allergies and reactions"
-        }},
-        "objective": {{
-            "vital_signs": "CONCISE string with ALL vital sign measurements EXACTLY as stated",
-            "physical_examination": "CONCISE string with physical examination findings by body system",
-            "laboratory_results": "CONCISE string with lab test results",
-            "imaging_results": "CONCISE string with imaging test results",
-            "other_diagnostics": "CONCISE string with other diagnostic test results"
-        }},
-        "assessment": {{
-            "diagnosis": "CONCISE string with diagnoses or differential diagnoses",
-            "clinical_impression": "CONCISE string with clinical impression or case summary"
-        }},
-        "plan": {{
-            "treatment": "CONCISE string with treatment plan INCLUDING ALL medications, dosages, and frequencies",
-            "patient_education": "CONCISE string with patient education and counseling points",
-            "referrals": "CONCISE string with referrals to other providers or specialists",
-            "additional_instructions": "CONCISE string with any additional instructions or recommendations"
-        }}
-        }}
+                SOAP Note Template:
 
-        IMPORTANT: 
-        - Your response MUST be a valid JSON object exactly matching this schema
-        - Use "Not documented" for any field without information in the conversation
-        - Do not invent information not present in the conversation
-        - Be DIRECT and CONCISE in all documentation while preserving clinical accuracy
-        - Always preserve ALL dates, medication dosages, and measurements EXACTLY as stated
-        """
+                Subjective:
+                [Current issues, reasons for visit, discussion topics, history of presenting complaints] (only if mentioned, otherwise blank)
+                [Past medical history, previous surgeries] (only if mentioned, otherwise blank)
+                [Medications and herbal supplements] (only if mentioned, otherwise blank)
+                [Social history] (only if mentioned, otherwise blank)
+                [Allergies] (only if mentioned, otherwise blank)
+                [Description of symptoms, onset, location, duration, characteristics, alleviating/aggravating factors, timing, severity] (narrative, full sentences, no bullets, only if mentioned) [Current medications and response to treatment] (narrative, full sentences, no bullets, only if mentioned) [Any side effects experienced] (narrative, full sentences, no bullets, only if mentioned) [Non-pharmacological interventions tried] (narrative, full sentences, no bullets, only if mentioned) [Description of any related lifestyle factors] (narrative, full sentences, no bullets, only if mentioned) [Patient’s experience and management of symptoms] (narrative, full sentences, no bullets, only if mentioned) [Any recent changes in symptoms or condition] (narrative, full sentences, no bullets, only if mentioned) [Any pertinent positive or negative findings in review of systems] (narrative, full sentences, no bullets, only if mentioned)
+
+                Review of Systems:
+                General: [weight loss, fever, fatigue, etc.] (only if mentioned, otherwise blank)
+                Skin: [rashes, itching, dryness, etc.] (only if mentioned, otherwise blank)
+                Head: [headaches, dizziness, etc.] (only if mentioned, otherwise blank)
+                Eyes: [vision changes, pain, redness, etc.] (only if mentioned, otherwise blank)
+                Ears: [hearing loss, ringing, pain, etc.] (only if mentioned, otherwise blank)
+                Nose: [congestion, nosebleeds, etc.] (only if mentioned, otherwise blank)
+                Throat: [sore throat, hoarseness, etc.] (only if mentioned, otherwise blank)
+                Neck: [lumps, pain, stiffness, etc.] (only if mentioned, otherwise blank)
+                Respiratory: [cough, shortness of breath, wheezing, etc.] (only if mentioned, otherwise blank)
+                Cardiovascular: [chest pain, palpitations, etc.] (only if mentioned, otherwise blank)
+                Gastrointestinal: [nausea, vomiting, diarrhea, constipation, etc.] (only if mentioned, otherwise blank)
+                Genitourinary: [frequency, urgency, pain, etc.] (only if mentioned, otherwise blank)
+                Musculoskeletal: [joint pain, muscle pain, stiffness, etc.] (only if mentioned, otherwise blank)
+                Neurological: [numbness, tingling, weakness, etc.] (only if mentioned, otherwise blank)
+                Psychiatric: [depression, anxiety, mood changes, etc.] (only if mentioned, otherwise blank)
+                Endocrine: [heat/cold intolerance, excessive thirst, etc.] (only if mentioned, otherwise blank)
+                Hematologic/Lymphatic: [easy bruising, swollen glands, etc.] (only if mentioned, otherwise blank)
+                Allergic/Immunologic: [allergies, frequent infections, etc.] (only if mentioned, otherwise blank)
+
+                Objective:
+                Vital Signs:
+                Blood Pressure: [reading] (only if mentioned, otherwise blank)
+                Heart Rate: [reading] (only if mentioned, otherwise blank)
+                Respiratory Rate: [reading] (only if mentioned, otherwise blank)
+                Temperature: [reading] (only if mentioned, otherwise blank)
+                Oxygen Saturation: [reading] (only if mentioned, otherwise blank)
+                General Appearance: [description] (only if mentioned, otherwise blank)
+                HEENT: [findings] (only if mentioned, otherwise blank)
+                Neck: [findings] (only if mentioned, otherwise blank)
+                Cardiovascular: [findings] (only if mentioned, otherwise blank)
+                Respiratory: [findings] (only if mentioned, otherwise blank)
+                Abdomen: [findings] (only if mentioned, otherwise blank)
+                Musculoskeletal: [findings] (only if mentioned, otherwise blank)
+                Neurological: [findings] (only if mentioned, otherwise blank)
+                Skin: [findings] (only if mentioned, otherwise blank)
+
+                Assessment:
+                [General diagnosis or clinical impression] (only if mentioned, otherwise blank)
+
+                [Issue 1 (issue, request, topic, or condition name)] Assessment:
+                [Likely diagnosis for Issue 1 (condition name only)]
+                [Differential diagnosis for Issue 1] (only if mentioned, otherwise blank) Diagnostic Tests: (omit section if not mentioned)
+                [Investigations and tests planned for Issue 1] (only if mentioned, otherwise blank) Treatment Plan:
+                [Treatment planned for Issue 1] (only if mentioned, otherwise blank)
+                [Relevant referrals for Issue 1] (only if mentioned, otherwise blank)
+
+                [Issue 2 (issue, request, topic, or condition name)] Assessment:
+                [Likely diagnosis for Issue 2 (condition name only)]
+                [Differential diagnosis for Issue 2] (only if mentioned, otherwise blank) Diagnostic Tests: (omit section if not mentioned)
+                [Investigations and tests planned for Issue 2] (only if mentioned, otherwise blank) Treatment Plan:
+                [Treatment planned for Issue 2] (only if mentioned, otherwise blank)
+                [Relevant referrals for Issue 2] (only if mentioned, otherwise blank)
+                [Additional issues (3, 4, 5, etc., as needed)] Assessment:
+                [Likely diagnosis for Issue 3, 4, 5, etc.]
+                [Differential diagnosis] (only if mentioned, otherwise blank) Diagnostic Tests: (omit section if not mentioned)
+                [Investigations and tests planned] (only if mentioned, otherwise blank) Treatment Plan:
+                [Treatment planned] (only if mentioned, otherwise blank)
+                [Relevant referrals] (only if mentioned, otherwise blank)
+
+                Follow-Up:
+                [Instructions for emergent follow-up, monitoring, and recommendations] (if nothing specific mentioned, use: “Instruct patient to contact the clinic if symptoms worsen or do not improve within a week, or if test results indicate further evaluation or treatment is needed.”)
+                [Follow-up for persistent, changing, or worsening symptoms] (only if mentioned, otherwise blank)
+                [Patient education and understanding of the plan] (only if mentioned, otherwise blank)
+
+                Instructions:
+                Output a plain-text SOAP note, formatted with headers (e.g., “Subjective”, “Assessment”), hyphens for bulleted lists, and blank lines between sections.
+                For narrative sections in Subjective (e.g., description of symptoms), use full sentences without bullets, ensuring concise phrasing.
+                Omit optional subsections (e.g., “Diagnostic Tests”) if not mentioned, but include all main sections (Subjective, Review of Systems, Objective, Assessment, Follow-Up) even if blank.
+                Convert time references to specific dates (e.g., “a week ago” → May 25, 2025).
+                Group related complaints in Assessment unless clearly unrelated (e.g., “Chest pain and palpitations” for suspected cardiac issue).
+                Use only input data, avoiding invented details, assessments, or plans.
+                Ensure professional, succinct wording (e.g., “Chest pain since May 28, 2025” instead of “Patient reports ongoing chest pain”).
+                If JSON output is required (e.g., for API compatibility), structure the note as a JSON object with keys (Subjective, ReviewOfSystems, Objective, Assessment, FollowUp) upon request.
+
+                Referrence Example:
+
+                Example Transcription:
+                Doctor: Good morning, Mr. Johnson. What brings you in today? 
+                Patient: I’ve been having chest pain and feeling my heart race since last Wednesday. It’s been tough to catch my breath sometimes. 
+                Doctor: How would you describe the chest pain? Where is it, and how long does it last? 
+                Patient: It’s a sharp pain in the center of my chest, lasts a few minutes, and comes and goes. It’s worse when I walk upstairs. 
+                Doctor: Any factors that make it better or worse? 
+                Patient: Resting helps a bit, but it’s still there. I tried taking aspirin a few days ago, but it didn’t do much. 
+                Doctor: Any other symptoms, like nausea or sweating? 
+                Patient: No nausea or sweating, but I’ve been tired a lot. No fever or weight loss. 
+                Doctor: Any past medical conditions or surgeries? 
+                Patient: I had high blood pressure diagnosed a few years ago, and I take lisinopril 20 mg daily. 
+                Doctor: Any side effects from the lisinopril? 
+                Patient: Not really, it’s been fine. My blood pressure’s been stable. 
+                Doctor: Any allergies? Patient: I’m allergic to penicillin. 
+                Doctor: What’s your lifestyle like? 
+                Patient: I’m a retired teacher, live alone, and walk daily. I’ve been stressed about finances lately. 
+                Doctor: Any family history of heart issues? 
+                Patient: My father had a heart attack in his 60s. 
+                Doctor: Let’s check your vitals. Blood pressure is 140/90, heart rate is 88, temperature is normal at 98.6°F. You appear well but slightly anxious. 
+                Doctor: Your symptoms suggest a possible heart issue. We’ll order an EKG and blood tests today and refer you to a cardiologist. Continue lisinopril, and avoid strenuous activity. Call us if the pain worsens or you feel faint. 
+                Patient: Okay, I understand. When should I come back? 
+                Doctor: Schedule a follow-up in one week to discuss test results, or sooner if symptoms worsen.
+
+                Example SOAP Note Output:
+
+                Subjective:
+                Chest pain and palpitations since May 28, 2025
+                History of hypertension
+                Lisinopril 20 mg daily
+                Retired teacher, lives alone, daily walks, financial stress
+                Penicillin allergy
+
+                The patient reports sharp chest pain in the center of the chest, lasting a few minutes, with intermittent episodes since May 28, 2025. The pain is associated with palpitations and shortness of breath, exacerbated by physical activity like walking upstairs and alleviated slightly by rest. The patient tried aspirin a few days ago without significant relief. The patient takes lisinopril 20 mg daily for hypertension, with good blood pressure control and no side effects. No non-pharmacological interventions have been attempted beyond rest. The patient’s lifestyle includes daily walks, but recent financial stress has been noted. The patient manages symptoms by resting when pain occurs. No recent changes in symptoms have been reported. The patient denies nausea, sweating, fever, or weight loss.
+
+                Review of Systems:
+                General: Fatigue
+                Respiratory: Shortness of breath
+                Cardiovascular: Chest pain, palpitations
+
+                Objective:
+                Vital Signs:
+                Blood Pressure: 140/90
+                Heart Rate: 88
+                Temperature: 98.6°F
+                General Appearance: Well-appearing, slightly anxious
+
+                Assessment:
+                Suspected cardiac issue
+                1. Chest pain and palpitations Assessment:
+                - Angina pectoris
+                Differential diagnosis: Myocardial infarction, Pulmonary embolism Diagnostic Tests:
+                EKG
+                Blood tests Treatment Plan:
+                Continue lisinopril 20 mg daily
+                Avoid strenuous activity
+                Referral to cardiology for evaluation
+
+                Follow-Up:
+                Schedule follow-up in one week to discuss test results
+                Instruct patient to contact the clinic if chest pain worsens or if fainting occurs
+             """
 
         elif template_type == "case_formulation":
                 system_message = """You are a mental health professional tasked with creating a concise case formulation report following the 4Ps schema (Predisposing, Precipitating, Perpetuating, and Protective factors). Based on the provided transcript of a clinical session, extract and organize relevant information into the following sections.
@@ -2751,215 +2865,7 @@ Format your response as a valid JSON object according to the clinical report sch
         - Be DIRECT and CONCISE in all documentation while preserving clinical accuracy
         - Always use "Client" instead of "Patient" throughout
         """
-        
-        # elif template_type == "new_soap_note":
-        #     system_message = f"""You are an expert medical documentation specialist with extensive experience in clinical documentation. Your task is to create precise, professional SOAP notes from medical conversations that matches this schema {NEW_SOAP_SCHEMA} following these guidelines:
-
-        # {preservation_instructions}
-        # {grammar_instructions}
-
-
-        # CORE PRINCIPLES:
-        # - Extract information ONLY from the provided transcript/notes - never fabricate or assume details
-        # - Use professional medical terminology and standard medical abbreviations
-        # - Maintain clinical objectivity and conciseness
-        # - Structure information logically within each section
-        # - Leave sections blank if information is not explicitly mentioned
-        # - Format vital signs using standard medical notation (e.g., "BP: 120/80 mmHg")
-        # - DO not include the past medical history in the subjective section.
-        # - Never add any information in the report that is not present in the transcript.
-        # - Give intelligence to the doctor and make the report more informative and document all findings effectively.
-        # - Dont include any information in the plan section that is not present in the transcript.
-        # SECTION-SPECIFIC GUIDELINES:
-
-        # SUBJECTIVE (S):
-        # - Document chief complaints with precise onset, duration, and character
-        # - Note modifying factors and temporal patterns
-        # - Include relevant self-management attempts and their efficacy
-        # - Document functional impact on ADLs/occupation
-        # - List associated symptoms systematically
-        # - For multiple complaints, enumerate each distinctly
-        # - Use medical terminology (e.g., "dyspnea on exertion" rather than "shortness of breath with activity")
-        # - Format subjective information in complete, professional sentences, with each point on a new line
-        
-        # Example format:
-        # . 46-year-old male with PMHx of mild asthma and T2DM presents with progressive respiratory symptoms over 1 week.
-        # - Symptoms initially attributed to URI but have worsened over past 6 days.
-        # - Primary symptoms include persistent cough productive of yellow-green sputum, dyspnea, and chest tightness.
-        # - Associated symptoms include intermittent low-grade fever.
-        # - Dyspnea significant with minimal exertion, leading to fatigue after walking few steps.
-        # - Reports wheezing and chest heaviness; denies pleuritic chest pain.
-        # - Recent exposure to URI from son last week; denies recent travel.
-        
-        # Key formatting principles:
-        # 1. Begin with patient demographics 
-        # 2. Present symptoms in chronological order
-        # 3. Use precise medical terminology
-        # 4. Document pertinent positives and negatives
-        # 5. Include relevant exposures and risk factors
-        # 6. Maintain professional, concise language throughout
-        # 7. Past medical history should not be included in the subjective section as it has its own section.
-
-
-        # PAST MEDICAL HISTORY (PMedHx):
-        # - List relevant medical conditions, surgeries, and treatments
-        # - Document pertinent negative findings
-        # - Include immunization status if mentioned
-        # - Note relevant investigations and their outcomes
-
-        # SOCIAL HISTORY (SocHx):
-        # - Document relevant lifestyle factors
-        # - Include occupational exposures if pertinent
-        # - Note substance use/habits
-        # - Document living situation if relevant
-
-        # FAMILY HISTORY (FHx):
-        # - Document relevant hereditary conditions
-        # - Include age of onset if mentioned
-        # - Note pertinent negative findings
-
-        # OBJECTIVE (O):
-        # - Begin with general appearance (use "NAD" if appropriate)
-        # - Format vital signs precisely:
-        # BP: [value] mmHg
-        # HR: [value] bpm
-        # Wt: [value] kg
-        # T: [value]°C
-        # O2: [value]%
-        # Ht: [value] cm
-        # - Use standard normal exam phrases:
-        # "N S1 and S2, no murmurs or extra beats"
-        # "Resp: Chest clear, no decr breath sounds"
-        # "No distension, BS+, soft, non-tender to palpation and percussion. No organomegaly"
-        # - For psychiatric evaluations, include:
-        # Appearance, speech, affect, perception, thought form/content, insight/judgment, cognition
-
-        # ASSESSMENT/PLAN (A/P):
-        # For each issue:
-        # 1. State the problem/condition concisely
-        # 2. Document assessment with likely diagnosis
-        # 3. List differential diagnoses in order of probability
-        # 4. Specify investigations with clear rationale
-        # 5. Detail treatment plan with specific interventions
-        # 6. Note relevant referrals and follow-up plans
-        # 7. Include the follow up plan in the plan section.
-        # 8. Dont include random investigations in the plan section, only include the investigations that are relevant to the issue and somewhat related to the discussion in the transcript.
-        # 9. For each issue, take separate Assessment, Differential diagnosis, Investigations planned, Treatment planned, Relevant referrals, Follow up plan, dont add them in the same issue.
-        # 10. Format assessment entries efficiently - avoid redundancy:
-        # INCORRECT:
-        # Issue: Acute bronchitis complicated by asthma and diabetes
-        # Assessment: Likely diagnosis is acute bronchitis complicated by asthma and diabetes
-
-        # CORRECT:
-        # Issue: Acute bronchitis
-        # Assessment: Complicated by underlying asthma and diabetes. Patient presents with...
-
-        # FORMAT EACH ISSUE IN THE PLAN AS FOLLOWS:
-        # 1. [Problem/Condition]
-        #    Assessment: [Likely diagnosis]
-        #    Differential diagnosis: [List alternatives in order of probability]
-        #    Investigations planned: [List with rationale]
-        #    Treatment planned: [Specific interventions with dosages]
-        #    Relevant referrals: [Referrals with timeframes]
-        #    Follow up plan: [Follow up plan with timeframes]
-           
-        # Example format:
-        # 1. Asthma exacerbation
-        #    Assessment: Likely diagnosis is asthma exacerbation
-        #    Differential diagnosis: COPD, bronchitis
-        #    Investigations planned: Spirometry, chest X-ray
-        #    Treatment planned: Prescribe inhaled corticosteroids and bronchodilators
-        #    Relevant referrals: Referral to pulmonologist for further evaluation
-        #    Follow up plan: Follow up in 2 weeks
-
-        # 2. Fatigue
-        #    Assessment: Likely diagnosis is related to asthma exacerbation
-        #    Differential diagnosis: Anemia, sleep apnea
-        #    Investigations planned: Complete blood count, sleep study
-        #    Treatment planned: Address underlying asthma exacerbation
-        #    Relevant referrals: None at this time
-        #    Follow up plan: Follow up in 4-5 days if not better
-
-        # FORMATTING RULES:
-        # - Use numerical ordering for multiple issues
-        # - Maintain consistent indentation
-        # - Use medical abbreviations appropriately
-        # - Employ subheadings in Assessment/Plan sections
-        # - Keep entries concise but complete
-
-        # CRITICAL NOTES:
-        # 1. Never fabricate or assume information not present in the source material
-        # 2. Leave sections blank rather than noting "not mentioned" or "unknown"
-        # 3. Maintain professional medical tone throughout
-        # 4. Focus on clinically relevant information
-        # 5. Use standard medical terminology and phrasing
-        # 6. Recognize and document pertinent positive and negative findings
-        # 7. Interpret examination findings accurately based on clinical context
-        # 8. Structure differential diagnoses in order of clinical probability
-        # 9. Ensure treatment plans align with current medical standards
-        # 10. Maintain logical flow and clinical coherence throughout the note
-        # 11. CRITICAL FINDINGS: Document ALL abnormal vital signs, concerning symptoms, or red flags that require immediate clinical attention (e.g., "BP 180/110", "SpO2 88%", "Acute chest pain")
-        # 12. VITAL SIGNS: Always document complete set of vital signs with exact values:
-        #     - Blood Pressure (BP)
-        #     - Heart Rate (HR)
-        #     - Respiratory Rate (RR)
-        #     - Temperature (T)
-        #     - Oxygen Saturation (SpO2)
-        #     - Weight (Wt)
-        #     - Height (Ht)
-        #     - BMI if available
-        # 13. DIAGNOSTIC REASONING: For each diagnosis, document:
-        #     - Supporting clinical findings
-        #     - Relevant test results
-        #     - Clinical reasoning for diagnosis
-        #     - Severity assessment
-        #     - Disease staging if applicable
-        # 14. DIFFERENTIAL DIAGNOSIS: For each primary diagnosis, include:
-        #     - At least 2-3 alternative diagnoses
-        #     - Key distinguishing features
-        #     - Plan for ruling out each alternative
-        # 15. TREATMENT PLAN: Document comprehensively:
-        #     - Medications with exact dosing, frequency, duration
-        #     - Non-pharmacological interventions
-        #     - Patient education points
-        #     - Treatment goals and expected outcomes
-        #     - Monitoring parameters
-        # 16. PROGNOSIS: Include specific details about:
-        #     - Expected course of condition
-        #     - Timeline for improvement
-        #     - Potential complications
-        #     - Risk factors for poor outcomes
-        #     - Quality of life impact
-        # 17. FOLLOW-UP PLAN: Specify:
-        #     - Next appointment timing
-        #     - Monitoring requirements
-        #     - Trigger points for earlier review
-        #     - Specialty referrals with timeframes
-        #     - Care coordination plans
-        # 18. SELF-CARE PLAN: Document specific instructions for:
-        #     - Lifestyle modifications
-        #     - Diet and exercise recommendations
-        #     - Home monitoring requirements
-        #     - Warning signs to watch for
-        #     - Emergency action plans
-        # 19. STRESS MANAGEMENT: Include detailed strategies for:
-        #     - Stress reduction techniques
-        #     - Coping mechanisms
-        #     - Support resources
-        #     - Crisis management plan
-        #     - Mental health support options
-        # 20. INVESTIGATIONS: Document all tests with:
-        #     - Specific test names
-        #     - Timing requirements
-        #     - Preparation instructions
-        #     - Expected result timeframes
-        #     - Follow-up plan for results
-        # 21. Analyse the examination doctor is doing like open ur mouth, listen to ur heart, listen to ur lungs, etc. and document it in the note with what the examination is called and what were the findings.
-
-        # Your output should reflect the highest standards of medical documentation, demonstrating clinical expertise while maintaining accuracy and relevance to the presented case. 
-        # Always include all vital signs, immunization and family history, and provide more detailed diagnostic reasoning for precision.
-        # ["The patient's temperature is 106°F, and the patient's oxygen saturation level is slightly low (94%), which are the critical findings that requires immediate attention."]"""
-                
+             
         elif template_type == "new_soap_note":
             user_instructions = f"""You are provided with a medical conversation transcript. 
             Analyze the transcript and generate a structured SOAP note following the specified template. 
@@ -2968,6 +2874,9 @@ Format your response as a valid JSON object according to the clinical report sch
             Address all chief complaints and issues separately in the S and A/P sections.
             Make sure the output is in valid JSON format.
             If the patient didnt provide the information regarding (S, PMedHx, SocHx, FHx, O, A/P) then ignore the respective section.
+            For time references (e.g., “this morning,” “last Wednesday”), convert to specific dates based on today’s date, June 1, 2025 (Sunday). For example, “this morning” is June 1, 2025; “last Wednesday” is May 28, 2025; “a week ago” is May 25, 2025
+            Include the all numbers in numeric format.
+            Make sure the output is concise and to the point.
             Below is the transcript:\n\n{conversation_text}"""
             
             
@@ -2987,7 +2896,7 @@ Format your response as a valid JSON object according to the clinical report sch
             Note impact on daily life, work, or activities.
             Include associated focal or systemic symptoms.
             List complaints clearly, avoiding redundancy.
-            Keep each point concise and to the point and in new line with "-" at the beginning of the line.
+            Keep each point concise and to the point and in new line with "- " at the beginning of the line.
 
             PMedHx:
             List contributing factors, including past medical/surgical history, investigations, and treatments relevant to the complaints.
@@ -2997,17 +2906,17 @@ Format your response as a valid JSON object according to the clinical report sch
             If the patient has not provided any information about the past medical history, then do not include it in the PMedHx section.
             If the patient dont have any history as discussed in the conversation and contexually the patient appears to be healthy then write "No medical conditions" otherwise write the medical conditions in the format discussed in this section.
             If the patient is not taking any medications then write "No medications" but if the patient is taking medications list the medications dosage and frequency.
-            Keep each point concise and to the point and in new line with "-" at the beginning of the line.
+            Keep each point concise and to the point and in new line with "- " at the beginning of the line.
 
             SocHx:
             List social history relevant to the complaints.
             Only list the social history if it is relevant to the complaints.
-            Keep each point concise and to the point and in new line with "-" at the beginning of the line. 
+            Keep each point concise and to the point and in new line with "- " at the beginning of the line. 
 
             FHx:
             List family history relevant to the complaints.
             Only list the family history if it is relevant to the complaints.
-            Keep each point concise and to the point and in new line with "-" at the beginning of the line.
+            Keep each point concise and to the point and in new line with "- " at the beginning of the line.
 
             O:
             Report vital signs as: BP:, HR:, Wt:, T:, O2:, Ht:.
@@ -3018,7 +2927,7 @@ Format your response as a valid JSON object according to the clinical report sch
             If abdominal exam is normal, report as “No distension, BS+, soft, non-tender to palpation and percussion. No organomegaly.”
             For psychiatry-related appointments, include: “Appears well, appropriately dressed for occasion. Normal speech. Reactive affect. No perceptual abnormalities. Normal thought form and content. Intact insight and judgement. Cognition grossly normal.”
             Do not include unmentioned exam findings or deductive statements.
-            Keep each point concise and to the point and in new line with "-" at the beginning of the line.
+            Keep each point concise and to the point and in new line with "- " at the beginning of the line.
 
             A/P:
             For each issue or group of related complaints (list as 1, 2, 3, etc.):
@@ -3028,6 +2937,7 @@ Format your response as a valid JSON object according to the clinical report sch
             - List planned investigations.
             - List planned treatments.
             - List relevant referrals and follow ups with timelines if mentioned. 
+            - If the have multiple treatments then list them in new line.
             Ensure A/P aligns with S, grouping related complaints unless explicitly separate.
 
             Instructions:
@@ -3067,42 +2977,41 @@ Format your response as a valid JSON object according to the clinical report sch
             Example SOAP Note Output:
 
             S:
-            Constant cough, shortness of breath, chest tightness for 6 days
-            Initially thought to be cold, now worsening with fatigue on minimal exertion
-            Yellowish-green sputum production
-            Breathing difficulty, especially at night
-            Mild wheezing, chest heaviness, no sharp pain
-            Son had severe cold last week
+            -  Constant cough, shortness of breath, chest tightness for 6 days
+            -  Initially thought to be cold, now worsening with fatigue on minimal exertion
+            -  Yellowish-green sputum production
+            -  Breathing difficulty, especially at night
+            -  Mild wheezing, chest heaviness, no sharp pain
+            -  Son had severe cold last week
 
             PMedHx:
-            Mild asthma - uses albuterol inhaler 1-2 times weekly
-            Type 2 diabetes - diagnosed 3 years ago
-            Medications: Metformin 500mg BD
-            No allergies
+            -  Mild asthma - uses albuterol inhaler 1-2 times weekly
+            -  Type 2 diabetes - diagnosed 3 years ago
+            -  Medications: Metformin 500mg BD
+            -  No allergies
 
             SocHx:
-            Ex-smoker, quit 10 years ago, smoked in college
+            -  Ex-smoker, quit 10 years ago, smoked in college
 
-            FHx:
-
-            O:
-            T: 38.1°C, RR: 22, O2 sat: 94%, HR: 92 bpm
-            Wheezing and crackles in both lower lung fields
-            Throat erythema with post-nasal drip
+            O:  
+            -  T: 38.1°C, RR: 22, O2 sat: 94%, HR: 92 bpm
+            -  Wheezing and crackles in both lower lung fields
+            -  Throat erythema with post-nasal drip
 
             A/P:
             1. Acute bronchitis with asthma exacerbation
-            Complicated by diabetes
-            Amoxicillin clavulanate 875/125mg BD for 7 days
-            Continue albuterol inhaler, increase to q4-6h PRN
-            Prednisone 40mg daily for 5 days
-            Guaifenesin with dextromethorphan PRN for cough
-            Monitor blood glucose more frequently while on prednisone
-            Seek emergency care if O2 saturation <92% or worsening breathing
-            Rest, hydration, avoid exertion
-            Use humidifier at night, avoid cold air
-            Follow-up in 3-5 days to reassess lungs and glycaemic control
-            Return sooner if symptoms worsen
+               Diagnosis: Complicated by diabetes
+               Treatment: 
+               Amoxicillin clavulanate 875/125mg BD for 7 days
+               Continue albuterol inhaler, increase to q4-6h PRN
+               Prednisone 40mg daily for 5 days
+               Guaifenesin with dextromethorphan PRN for cough
+               Monitor blood glucose more frequently while on prednisone
+               Seek emergency care if O2 saturation <92% or worsening breathing
+               Rest, hydration, avoid exertion
+               Use humidifier at night, avoid cold air
+               Follow-up: Follow-up in 3-5 days to reassess lungs and glycaemic control
+               Return sooner if symptoms worsen
 
 
             Example 2:
@@ -3142,35 +3051,35 @@ Format your response as a valid JSON object according to the clinical report sch
             Example SOAP Note Output:
             
             S:
-            Persistent abdominal pain in right upper quadrant for 2 weeks, dull ache, 6/10 severity, worse after fatty foods. Antacids ineffective.
-            Nausea present, no vomiting. Pale, greasy stools for 1 week. 5 lb weight loss.
-            Fatigue affecting work performance as mechanic, difficulty concentrating, present for approximately 2 weeks.
-            Joint pain in knees and hands, worse in morning with 1 hour stiffness. Previous mention of possible rheumatoid arthritis (not confirmed).
-            Chest discomfort described as pressure sensation, present for 1 week, occurs with fatigue/stress.
-            Mild shortness of breath on exertion (climbing stairs).
+            -  Persistent abdominal pain in right upper quadrant for 2 weeks, dull ache, 6/10 severity, worse after fatty foods. Antacids ineffective.
+            -  Nausea present, no vomiting. Pale, greasy stools for 1 week. 5 lb weight loss.
+            -  Fatigue affecting work performance as mechanic, difficulty concentrating, present for approximately 2 weeks.
+            -  Joint pain in knees and hands, worse in morning with 1 hour stiffness. Previous mention of possible rheumatoid arthritis (not confirmed).
+            -  Chest discomfort described as pressure sensation, present for 1 week, occurs with fatigue/stress.
+            -  Mild shortness of breath on exertion (climbing stairs).
 
             PMedHx:
-            Hypertension (diagnosed 5 years ago)
-            Hepatitis C (10 years ago, treated and cured)
-            Medications: Lisinopril 10mg daily
-            Immunisations: Influenza vaccine last year, tetanus up to date
+            -  Hypertension (diagnosed 5 years ago)
+            -  Hepatitis C (10 years ago, treated and cured)
+            -  Medications: Lisinopril 10mg daily
+            -  Immunisations: Influenza vaccine last year, tetanus up to date
 
             SocHx:
-            Mechanic
-            Smoker (10 cigarettes/day for 20 years)
-            Alcohol 1-2 drinks on weekends
+            -  Mechanic
+            -  Smoker (10 cigarettes/day for 20 years)
+            -  Alcohol 1-2 drinks on weekends
 
             FHx:
-            Father died of MI at age 50
-            Mother has rheumatoid arthritis
+            -  Father died of MI at age 50
+            -  Mother has rheumatoid arthritis
 
             O:
-            BP 140/90, HR 88, T 37.2°C, O2 96%, Wt 185 lbs, Ht 5'10"
-            CVS: N S1 and S2, no murmurs or extra beats
-            Resp: Chest clear, no decr breath sounds
-            Abdomen: No distension, BS+, mild RUQ tenderness, soft. No organomegaly
-            MSK: Mild swelling in both knees, no redness
-            Skin: No rashes or lesions
+            -  BP 140/90, HR 88, T 37.2°C, O2 96%, Wt 185 lbs, Ht 5'10"
+            -  CVS: N S1 and S2, no murmurs or extra beats
+            -  Resp: Chest clear, no decr breath sounds
+            -  Abdomen: No distension, BS+, mild RUQ tenderness, soft. No organomegaly
+            -  MSK: Mild swelling in both knees, no redness
+            -  Skin: No rashes or lesions
 
             A/P:
             1. Abdominal pain
@@ -3196,34 +3105,34 @@ Format your response as a valid JSON object according to the clinical report sch
             Example 3:
 
             Example Transcription:
-            good morning mister patel what bring you today. good morning doctor i'm bit of lately kind of fatigue and i have got this dull headache just does not go away i see how long has this been going on about two weeks now at first i thought it was just a stress but it's not improving okay do you have any other symptoms fever nausea and dizziness not really a fever i think maybe low grade i do feel dizzy when i stand up too quickly though have you noticed any changes in the appetite or sleep yeah actually i'm not eating as much i wake up in the middle of the night and can't fall back asleep understood are you currently taking any medicine prescribed over the counter or supplements doctor just a multimeter one no prescription i had some ibuprofen a few days ago for headache but it did not do much alright any history of chronic condition diabetes hypertension thyroid problem not pretty healthy generally my dad had high blood pressure though okay let me check your vitals blood pressure is one thirty eight or over 88 a bit elevated pulse is 92 mild tachycardia any recent stress or work or home yeah actually there has been lot of  going on at work i am behind on deadlines and it's been tough to keep up that might be contributing to your symptoms stress can manifest physically fatigue headache even sleep disturbance but we will run some basic tests to rule out anemia thyroid dis dysfunction and infection alright doctor that's good should i worry not nothing immediately  alarming but good you are here so we will do cbc thyroid panel and maybe metabolic panel also i recommend you hydrate it well and if possible reduce caffeine and screen time before bed alright when will i get the test results usually within twenty four to forty eight hours we will give you a call or you can check them through the patient portal if anything abnormal come up we will schedule a follow-up thanks doctor i'll really appreciate it of course take your take care of yourself and we will be in touch soon
+            Speaker 0 good morning mister patel what bring you today. good morning doctor i'm bit of lately kind of fatigue and i have got this dull headache just does not go away i see how long has this been going on about two weeks now at first i thought it was just a stress but it's not improving okay do you have any other symptoms fever nausea and dizziness not really a fever i think maybe low grade i do feel dizzy when i stand up too quickly though have you noticed any changes in the appetite or sleep yeah actually i'm not eating as much i wake up in the middle of the night and can't fall back asleep understood are you currently taking any medicine prescribed over the counter or supplements doctor just a multimeter one no prescription i had some ibuprofen a few days ago for headache but it did not do much alright any history of chronic condition diabetes hypertension thyroid problem not pretty healthy generally my dad had high blood pressure though okay let me check your vitals blood pressure is one thirty eight or over 88 a bit elevated pulse is 92 mild tachycardia any recent stress or work or home yeah actually there has been lot of  going on at work i am behind on deadlines and it's been tough to keep up that might be contributing to your symptoms stress can manifest physically fatigue headache even sleep disturbance but we will run some basic tests to rule out anemia thyroid dis dysfunction and infection alright doctor that's good should i worry not nothing immediately  alarming but good you are here so we will do cbc thyroid panel and maybe metabolic panel also i recommend you hydrate it well and if possible reduce caffeine and screen time before bed alright when will i get the test results usually within twenty four to forty eight hours we will give you a call or you can check them through the patient portal if anything abnormal come up we will schedule a follow-up thanks doctor i'll really appreciate it of course take your take care of yourself and we will be in touch soon
 
             Example SOAP Note Output:
 
             S:
-            - Fatigue and dull headache for two weeks.
-            - Initially attributed to stress, not improving.
-            - Ibuprofen taken few days ago with minimal relief.
-            - Dizziness when standing quickly.
-            - Decreased appetite.
-            - Sleep disturbance - waking during night, difficulty returning to sleep.
-            - Significant work stress, behind on deadlines.
+            -  Fatigue and dull headache for two weeks.
+            -  Initially attributed to stress, not improving.
+            -  Ibuprofen taken few days ago with minimal relief.
+            -  Dizziness when standing quickly.
+            -  Decreased appetite.
+            -  Sleep disturbance - waking during night, difficulty returning to sleep.
+            -  Significant work stress, behind on deadlines.
 
             PMedHx:
-            - Generally healthy.
-            - Multivitamin daily.
+            -  Generally healthy.
+            -  Multivitamin daily.
 
             SocHx:
-            - Work stress with deadlines.
+            -  Work stress with deadlines.
 
             FHx:
-            Father with hypertension.
+            -  Father with hypertension.
 
             O:
-            NAD
-            BP: 138/88 (elevated)
-            HR: 92 (mild tachycardia)
-            Investigations: None performed during visit.
+            -  NAD
+            -  BP: 138/88 (elevated)
+            -  HR: 92 (mild tachycardia)
+            -  Investigations: None performed during visit.
 
             A/P:
             1. Fatigue and headache
@@ -3235,13 +3144,12 @@ Format your response as a valid JSON object according to the clinical report sch
             Follow-up if abnormal results
 
             """
-
         # Make the API request to GPT - Remove the response_format parameter which is causing the error
         response = client.chat.completions.create(
             model="gpt-4.1",
             messages=[
                 {"role": "system", "content": system_message},
-                {"role": "user", "content": user_instructions if template_type == "new_soap_note" else f"Here is a medical conversation. Please format it into a structured {template_type}. YOUR RESPONSE MUST BE VALID JSON:\n\n{conversation_text}"}
+                {"role": "user", "content": user_instructions if template_type == "new_soap_note" or template_type == "detailed_soap_note" else f"Here is a medical conversation. Please format it into a structured {template_type}. YOUR RESPONSE MUST BE VALID JSON:\n\n{conversation_text}"}
             ],
             temperature=0.3, # Lower temperature for more consistent outputs
             response_format={"type": "json_object"}
@@ -3843,91 +3751,101 @@ async def retry_report(report_id: str, template_type: str = None):
         Updated report data
     """
     try:
-        # Get the report from DynamoDB
-        reports_table = dynamodb.Table('reports')
-        response = reports_table.get_item(Key={"id": report_id})
+        # Get the original report from DynamoDB
+        report_table = dynamodb.Table('reports')
+        response = report_table.get_item(Key={"id": report_id})
         
         if 'Item' not in response:
             return JSONResponse(
                 {"error": f"Report ID {report_id} not found"},
                 status_code=404
             )
-        
+            
         report_item = response['Item']
+        
+        # Get the transcript using the transcript_id from the report
         transcript_id = report_item.get('transcript_id')
-        original_template = report_item.get('template_type')
-        
-        # Use provided template type or fall back to original
-        if not template_type:
-            template_type = original_template
-        
-        # Get the transcript data
-        transcripts_table = dynamodb.Table('transcripts')
-        transcript_response = transcripts_table.get_item(Key={"id": transcript_id})
+        if not transcript_id:
+            return JSONResponse(
+                {"error": "Original transcript ID not found in report"},
+                status_code=400
+            )
+            
+        # Get the transcript
+        transcript_table = dynamodb.Table('transcripts')
+        transcript_response = transcript_table.get_item(Key={"id": transcript_id})
         
         if 'Item' not in transcript_response:
             return JSONResponse(
-                {"error": f"Associated transcript ID {transcript_id} not found"},
+                {"error": f"Original transcript {transcript_id} not found"},
                 status_code=404
             )
-        
+            
         transcript_item = transcript_response['Item']
         
-        # Parse transcript data
+        # Decrypt and parse transcript data
         try:
-            transcription = json.loads(transcript_item.get('transcript', '{}'))
-        except json.JSONDecodeError:
-            return JSONResponse(
-                {"error": "Invalid transcript data format"},
-                status_code=400
-            )
-        
-        # Validate template type
-        valid_templates = ["clinical_report", "new_soap_note","detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes", "pathology_note", "consult_note","discharge_summary","case_formulation"]
-        if template_type not in valid_templates:
-            error_msg = f"Invalid template type '{template_type}'. Must be one of: {', '.join(valid_templates)}"
+            # Handle Binary type from DynamoDB
+            encrypted_transcript = transcript_item.get('transcript')
+            if isinstance(encrypted_transcript, dict) and 'value' in encrypted_transcript:
+                encrypted_transcript = encrypted_transcript['value']
+                
+            decrypted_transcript = decrypt_data(encrypted_transcript)
+            transcription = json.loads(decrypted_transcript)
+        except Exception as e:
+            error_msg = f"Error decrypting transcript: {str(e)}"
+            error_logger.error(error_msg)
             return JSONResponse({"error": error_msg}, status_code=400)
-        
-        # Generate new GPT response
-        gpt_response = await generate_gpt_response(transcription, template_type)
-        
-        if isinstance(gpt_response, str) and gpt_response.startswith("Error"):
-            return JSONResponse({"error": gpt_response}, status_code=400)
-        
-        # Format the report
-        formatted_report = await format_report(gpt_response, template_type)
-        
+            
+        # Get the template schema
+        custom_template = report_item.get('custom_template')
+        if custom_template:
+            try:
+                template_schema = json.loads(custom_template)
+            except json.JSONDecodeError as e:
+                error_msg = f"Invalid template schema format: {str(e)}"
+                error_logger.error(error_msg)
+                return JSONResponse({"error": error_msg}, status_code=400)
+        else:
+            # Use predefined schema based on template_type
+            template_schema = globals().get(f"{template_type.upper()}_SCHEMA")
+            if not template_schema:
+                return JSONResponse(
+                    {"error": f"Template type {template_type} not found"},
+                    status_code=400
+                )
+                
+        # Generate new report
+        formatted_report = await generate_report_from_transcription(transcription, template_schema)
         if isinstance(formatted_report, str) and formatted_report.startswith("Error"):
             return JSONResponse({"error": formatted_report}, status_code=400)
+            
+        # Add template_type as the main heading
+        formatted_report = f"# {template_type}\n\n{formatted_report}"
         
         # Update the report in DynamoDB
-        now = datetime.now().isoformat()
-        reports_table.update_item(
-            Key={"id": report_id},
-            UpdateExpression="SET gpt_response = :gpt_response, formatted_report = :formatted_report, template_type = :template_type, updated_at = :updated_at",
-            ExpressionAttributeValues={
-                ":gpt_response": gpt_response,
-                ":formatted_report": formatted_report,
-                ":template_type": template_type,
-                ":updated_at": now
-            }
-        )
-        
-        return {
-            "success": True,
-            "message": "Report generation retried successfully",
-            "report_id": report_id,
-            "template_type": template_type,
-            "formatted_report": formatted_report,
-            "gpt_response": json.loads(gpt_response)
+        update_expression = "SET formatted_report = :r, updated_at = :t"
+        expression_values = {
+            ":r": formatted_report,
+            ":t": datetime.utcnow().isoformat()
         }
         
-    except Exception as e:
-        error_logger.exception(f"Error retrying report generation: {str(e)}")
-        return JSONResponse(
-            {"error": f"Failed to retry report generation: {str(e)}"},
-            status_code=500
+        report_table.update_item(
+            Key={"id": report_id},
+            UpdateExpression=update_expression,
+            ExpressionAttributeValues=expression_values
         )
+        
+        return JSONResponse({
+            "report_id": report_id,
+            "template_type": template_type,
+            "formatted_report": formatted_report
+        })
+        
+    except Exception as e:
+        error_msg = f"Failed to retry report generation: {str(e)}"
+        error_logger.exception(error_msg)
+        return JSONResponse({"error": error_msg}, status_code=500)
 
 @app.post("/generate-summary/{transcript_id}")
 @log_execution_time
@@ -4357,6 +4275,53 @@ async def format_soap_note(gpt_response):
     except Exception as e:
         error_logger.error(f"Error formatting SOAP note: {str(e)}", exc_info=True)
         return f"Error formatting SOAP note: {str(e)}"
+def format_ap_section(ap_data):
+    """
+    Unfolds an A/P dictionary into a plain-text format without hardcoding key names.
+    Args:
+        ap_data (dict): The A/P section of the SOAP note as a dictionary.
+    Returns:
+        list: List of formatted strings for inclusion in note.
+    """
+    output = []
+
+    def format_value(value, indent=0):
+        """Helper function to format values (strings, lists, or dicts) recursively."""
+        if isinstance(value, str):
+            return value
+        elif isinstance(value, list):
+            return "\n".join(f"{'  ' * indent}- {item}" for item in value if item)  # Skip empty items
+        elif isinstance(value, dict):
+            return "\n".join(
+                f"{'  ' * indent}{key}: {format_value(val, indent + 1)}" for key, val in value.items() if val
+            )
+        return str(value)
+
+    # Iterate through top-level keys (e.g., "1", "2") as entry numbers
+    for entry_key, entry_value in sorted(ap_data.items(), key=lambda x: int(x[0]) if x[0].isdigit() else x[0]):
+        if isinstance(entry_value, dict):
+            # Start with entry number
+            issue = None
+            for key, val in entry_value.items():
+                if isinstance(val, str) and not issue:  # Assume first string is the issue
+                    issue = val
+                    output.append(f"{entry_key}. {val}")
+                    break
+            # Format remaining key-value pairs
+            for key, val in entry_value.items():
+                if val and not isinstance(val, str):  # Handle lists or dicts
+                    formatted = format_value(val, 1)
+                    if formatted.strip():
+                        output.append(f"{key}:")
+                        output.append(formatted)
+                elif val and issue != val:  # Handle other strings (e.g., Diagnosis)
+                    output.append(f"{key}: {val}")
+            output.append("")  # Blank line between entries
+        else:
+            output.append(f"{entry_key}: {format_value(entry_value, 1)}")
+            output.append("")
+
+    return output
 
 
 async def format_new_soap(gpt_response):
@@ -4376,46 +4341,50 @@ async def format_new_soap(gpt_response):
         note.append("# SOAP NOTE\n")
         
         # SUBJECTIVE
-        note.append("## SUBJECTIVE")
         if gpt_response.get("S"):
+            note.append("## SUBJECTIVE")
             for item in gpt_response["S"]:
                 note.append(item)
-        note.append("")
+            note.append("")
         
         # PAST MEDICAL HISTORY
-        note.append("## PAST MEDICAL HISTORY")
         if gpt_response.get("PMedHx"):
+            note.append("## PAST MEDICAL HISTORY")
             for item in gpt_response["PMedHx"]:
-                note.append(f"- {item}")
-        note.append("")
+                note.append(f"{item}")
+            note.append("")
         
         # SOCIAL HISTORY
-        note.append("## SOCIAL HISTORY")
         if gpt_response.get("SocHx"):
+            note.append("## SOCIAL HISTORY")
             for item in gpt_response["SocHx"]:
                 note.append(item)
-        note.append("")
+            note.append("")
         
         # FAMILY HISTORY
-        note.append("## FAMILY HISTORY")
         if gpt_response.get("FHx"):
+            note.append("## FAMILY HISTORY")
             for item in gpt_response["FHx"]:
                 note.append(item)
-        note.append("")
+            note.append("")
         
         # OBJECTIVE
-        note.append("## OBJECTIVE")
         if gpt_response.get("O"):
+            note.append("## OBJECTIVE")
             for item in gpt_response["O"]:
-                note.append(f"- {item}")
-        note.append("")
-        
-        # ASSESSMENT & PLAN
-        note.append("## ASSESSMENT & PLAN")
-        if gpt_response.get("A/P"):
-            for item in gpt_response["A/P"]:
                 note.append(f"{item}")
-                note.append("")
+            note.append("")
+        # ASSESSMENT & PLAN
+        # if gpt_response.get("A/P"):
+        #     note.append("## ASSESSMENT & PLAN")
+        #     for item in gpt_response["A/P"]:
+        #         note.append(f"{item}")
+        #         note.append("")
+        if gpt_response.get("A/P"):
+            note.append("## ASSESSMENT & PLAN")
+            ap_lines = format_ap_section(gpt_response["A/P"])
+            note.extend(ap_lines)
+            note.append("")  # Blank line after section
         
         return "\n".join(note)
     except Exception as e:
@@ -4777,7 +4746,6 @@ async def format_detailed_soap_note(gpt_response):
     """
     try:
         note = []
-        
         # Add title
         note.append("# Detailed SOAP Note\n")
         
@@ -6913,7 +6881,6 @@ async def generate_report_with_language_model(conversation_text, template_schema
             
         # Use the global client with API key
         global client
-        
         response = client.chat.completions.create(
             model="gpt-4", # or another appropriate model like "gpt-3.5-turbo"
             messages=[
