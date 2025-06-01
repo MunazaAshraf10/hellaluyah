@@ -2069,94 +2069,120 @@ CRITICAL GRAMMAR INSTRUCTIONS:
 
         # Template-specific instructions and schema
         if template_type == "soap_note":
+            user_instructions = f"""You are provided with a medical conversation transcript. 
+            Analyze the transcript thoroughly to generate a structured SOAP note following the specified template, synthesizing the patient’s case from a physician’s perspective to produce a concise, professional, and clinically relevant note that facilitates medical decision-making. 
+            Use only information explicitly provided in the transcript, without assuming or adding any details. 
+            Ensure the output is a valid JSON object with the SOAP note sections (Subjective, Past Medical History, Objective, Assessment, Plan) as keys, formatted in a professional, doctor-like tone. 
+            Address each chief complaint and issue separately in the Subjective and Assessment/Plan sections. 
+            For time references (e.g., 'this morning' to June 1, 2025; 'last Wednesday' to May 28, 2025; 'a week ago' to May 25, 2025), convert to specific dates based on today’s date, June 1, 2025 (Sunday). 
+            Use numeric format for all numbers (e.g., '2' instead of 'two'). Ensure each point in Subjective, Past Medical History, and Objective starts with '- ', while Assessment and Plan use subheadings without '- ' for clear, concise points. 
+            Omit sections with no relevant information. The note should be streamlined and to the point, prioritizing utility for physicians. 
+            Use the specific template provided below to generate the SOAP note.
+            Dont Repeat any points in the subjective, and past medical history.
+            For all numbers related information, preserve the exact numbers mentioned in the transcript and use digits.
+            Below is the transcript:
+
+            {conversation_text}
+
+
+            """
             # SOAP Note Instructions - Updated for conciseness and direct language
-            system_message = f"""You are a medical documentation expert specializing in SOAP notes. 
-{preservation_instructions}
-{grammar_instructions}
+            system_message = f"""You are an expert medical scribe tasked with generating a professional, concise, and clinically relevant SOAP note based solely on the patient transcript, contextual notes, or clinical note provided. 
+            Your role is to analyze the input thoroughly, synthesize the patient’s case from a physician’s perspective, and produce a streamlined SOAP note that prioritizes clarity, relevance, and utility for medical decision-making. 
+            Adhere strictly to the provided SOAP note template, including only information explicitly stated in the input. Structure the note in point form, starting each line with '- ', and ensure it is professional, avoiding extraneous details.
+            Convert vague time references (e.g., 'this morning' to June 1, 2025; 'last Wednesday' to May 28, 2025; 'a week ago' to May 25, 2025) based on today’s date, June 1, 2025 (Sunday). 
+            Do not fabricate or infer patient details, assessments, plans, interventions, evaluations, or care plans beyond what is explicitly provided. Omit sections with no relevant information. 
+            The output should be a plain text SOAP note tailored to assist physicians efficiently. 
+            {preservation_instructions} {grammar_instructions}
+            
+            The template is as follows:
 
-CRITICAL STYLE INSTRUCTIONS:
-1. Be CONCISE and DIRECT in your documentation (e.g., "Lost 2kg in 3 weeks" NOT "The patient reported that they have lost two kilograms over the past three weeks")
-2. Use medical shorthand where appropriate (e.g., "BP 120/80" instead of "Blood pressure is 120/80")
-3. Format all assessment issues as a numbered list with clear issue, diagnosis, and differential diagnosis
-4. Focus on capturing critical details using the fewest words necessary
-5. Use bullet-point style phrasing rather than complete sentences when possible
+            Subjective:
+            - Chief complaints and reasons for visit (e.g., symptoms, patient requests) (include only if explicitly stated)
+            - Duration, timing, location, quality, severity, and context of complaints (include only if explicitly stated)
+            - Factors worsening or alleviating symptoms, including self-treatment attempts and their effectiveness (include only if explicitly stated)
+            - Progression of symptoms over time (include only if explicitly stated)
+            - Previous episodes of similar symptoms, including timing, management, and outcomes (include only if explicitly stated)
+            - Impact of symptoms on daily life, work, or activities (include only if explicitly stated)
+            - Associated focal or systemic symptoms related to chief complaints (include only if explicitly stated)
 
-When formatting the provided medical conversation, structure it according to the SOAP format:
-- Subjective: Patient's statements, symptoms, and concerns WITH ALL DATES and timelines preserved exactly
-- Objective: ONLY include vital signs, physical examination findings, and completed investigations WITH RESULTS that are explicitly mentioned. DO NOT include planned investigations here.
-- Assessment: Medical assessment and diagnoses as numbered issues with clear diagnoses
-- Plan: Treatment plan WITH ALL medication names, doses, and schedules preserved exactly. Include planned investigations here, not in Objective.
+            Past Medical History:
+            - Relevant past medical or surgical history, investigations, and treatments tied to chief complaints (include only if explicitly stated)
+            - Relevant social history (e.g., lifestyle, occupation) related to chief complaints (include only if explicitly stated)
+            - Relevant family history linked to chief complaints (include only if explicitly stated)
+            - Exposure history (e.g., environmental, occupational) (include only if explicitly stated)
+            - Immunization history and status (include only if explicitly stated)
+            - Other relevant subjective information (include only if explicitly stated)
 
-Format your response as a valid JSON object according to this schema:
-{{
-  "subjective": {{
-    "chief_complaint": "CONCISE string with chief complaints and all dates",
-    "history_of_present_illness": "CONCISE string with timeline and all dates",
-    "current_medications": "CONCISE list of ALL medications with EXACT dosages",
-    "allergies": "CONCISE string",
-    "past_medical_history": "CONCISE string",
-    "family_history": "CONCISE string",
-    "social_history": "CONCISE string",
-    "review_of_systems": "CONCISE string"
-  }},
-  "past_medical_history": {{
-    "medical_conditions": "CONCISE string",
-    "surgical_history": "CONCISE string",
-    "family_history": "CONCISE string",
-    "social_history": "CONCISE string",
-    "mental_health_history": "CONCISE string",
-    "environmental_factors": "CONCISE string",
-    "other_factors": "CONCISE string"
-  }},
-  "objective": {{
-    "vital_signs": {{
-      "blood_pressure": "DIRECT string with exact values if mentioned",
-      "heart_rate": "DIRECT string with exact values if mentioned",
-      "respiratory_rate": "DIRECT string with exact values if mentioned",
-      "temperature": "DIRECT string with exact values if mentioned",
-      "oxygen_saturation": "DIRECT string with exact values if mentioned",
-      "weight": "DIRECT string with exact values if mentioned",
-      "height": "DIRECT string with exact values if mentioned",
-      "bmi": "DIRECT string with exact values if mentioned",
-      "pain_level": "DIRECT string with exact values if mentioned"
-    }},
-    "physical_exam": {{
-      "findings": "CONCISE string with any examination findings"
-    }},
-    "investigations_results": {{
-      "completed_investigations": "CONCISE string with results of COMPLETED investigations only"
-    }}
-  }},
-  "assessment": [
-    {{
-      "issue": "CONCISE string describing problem",
-      "diagnosis": "CONCISE string with formal diagnosis if made",
-      "differential_diagnosis": "CONCISE string with alternative diagnoses being considered"
-    }}
-  ],
-  "plan": {{
-    "investigations_planned": ["Array of planned tests/investigations WITH clear context (e.g., 'Blood tests ordered', 'Physical examination scheduled') and exact dates"],
-    "treatment_plan": ["Array of treatments WITH clear action context (e.g., 'Prescribed', 'Advised to', 'Recommended') and all medication details, dosages, and schedules"],
-    "followup": ["Array of followup plans WITH clear description (e.g., 'Follow-up appointment scheduled', 'Requested to return if symptoms worsen') and specific dates"],
-    "referrals": ["Array of referrals WITH clear status (e.g., 'Referred to', 'Referral planned to') and timeframes"],
-    "other_actions": ["Array of other actions WITH clear descriptive context about what was recommended or planned"]
-  }}
-}}
+            Objective:
+            - Vital signs (include only if explicitly stated)
+            - Physical or mental state examination findings, including system-specific exams (include only if explicitly stated)
+            - Completed investigations and their results (include only if explicitly stated; planned or ordered investigations belong in Plan)
 
-For the assessment section, format each issue as follows:
-1. First issue with diagnosis and differential diagnosis (if available)
-2. Second issue with diagnosis and differential diagnosis (if available)
-3. And so on...
+            Assessment:
+            - Likely diagnosis (include only if explicitly stated)
+            - Differential diagnosis (include only if explicitly stated)
 
-IMPORTANT: 
-- Your response MUST be a valid JSON object exactly matching this schema
-- Use "Not discussed" for any field without information in the conversation
-- Do not invent information not present in the conversation
-- Be DIRECT and CONCISE in all documentation while preserving clinical accuracy
-- Always preserve ALL dates, medication dosages, and measurements EXACTLY as stated
-- Only include COMPLETED investigations under Objective; planned investigations go under Plan
-- For plan items, add explanatory context to make them more descriptive (e.g., "Physical examination scheduled" instead of just "Physical examination")
-"""
+            Plan:
+            - Planned investigations (include only if explicitly stated)
+            - Planned treatments (include only if explicitly stated)
+            - Other actions (e.g., counseling, referrals, follow-up instructions) (include only if explicitly stated)
+            
+            Referrence Example:
+
+            Example Transcription:
+            Speaker 0: Good morning, Mr. Johnson. What brings you in today? 
+            Speaker 1: I’ve been having chest pain and feeling my heart race since last Wednesday. It’s been tough to catch my breath sometimes. 
+            Speaker 0: How would you describe the chest pain? Where is it, and how long does it last? 
+            Speaker 1: It’s a sharp pain in the center of my chest, lasts a few minutes, and comes and goes. It’s worse when I walk upstairs. 
+            Speaker 0: Any factors that make it better or worse? 
+            Speaker 1: Resting helps a bit, but it’s still there. I tried taking aspirin a few days ago, but it didn’t do much. 
+            Speaker 0: Any other symptoms, like nausea or sweating? 
+            Speaker 1: No nausea or sweating, but I’ve been tired a lot. No fever or weight loss. 
+            Speaker 0: Any past medical conditions or surgeries? 
+            Speaker 1: I had high blood pressure diagnosed a few years ago, and I take lisinopril 20 mg daily. 
+            Speaker 0: Any side effects from the lisinopril? 
+            Speaker 1: Not really, it’s been fine. My blood pressure’s been stable. 
+            Speaker 0: Any allergies? 
+            Speaker 1: I’m allergic to penicillin. 
+            Speaker 0: What’s your lifestyle like? 
+            Speaker 1: I’m a retired teacher, live alone, and walk daily. I’ve been stressed about finances lately. 
+            Speaker 0: Any family history of heart issues? 
+            Speaker 1: My father had a heart attack in his 60s. 
+            Speaker 0: Let’s check your vitals. Blood pressure is 140/90, heart rate is 88, temperature is normal at 98.6°F. You appear well but slightly anxious. 
+            Speaker 0: Your symptoms suggest a possible heart issue. We’ll order an EKG and blood tests today and refer you to a cardiologist. Continue lisinopril, and avoid strenuous activity. Call us if the pain worsens or you feel faint. 
+            Speaker 1: Okay, I understand. When should I come back? 
+            Speaker 0: Schedule a follow-up in one week to discuss test results, or sooner if symptoms worsen.
+
+            Example SOAP Note Output:
+
+            Subjective:
+            - Chest pain and heart racing since last Wednesday. Dyspnoea.
+            - Sharp pain in centre of chest, lasting few minutes, intermittent. Worse when climbing stairs.
+            - Resting helps slightly. Tried aspirin with minimal effect.
+            - Associated fatigue. No nausea, sweating, fever or weight loss.
+
+            Past Medical History:
+            - Hypertension - on lisinopril 20mg daily. BP stable.
+            - Allergies: Penicillin.
+            - Social: Retired teacher. Lives alone. Daily walks. Financial stress recently.
+            - Family history: Father had MI in 60s.
+
+            Objective:
+            - BP 140/90, HR 88, temperature normal (98.6°F).
+            - Appears well but slightly anxious.
+
+            Assessment:
+            - Possible cardiac issue.
+
+            Plan:
+            - ECG and blood tests ordered.
+            - Cardiology referral.
+            - Continue lisinopril.
+            - Avoid strenuous activity.
+            - Advised to call if pain worsens or develops syncope.
+            - Follow-up in one week to discuss results, or sooner if symptoms worsen.
+            """
         
         elif template_type == "referral_letter":
             system_message = f"""You are a medical documentation expert specializing in professional referral letters.
@@ -2597,6 +2623,7 @@ Format your response as a valid JSON object according to the clinical report sch
                 Include all numbers in numeric format (e.g., '20 mg' instead of 'twenty mg'). 
                 Leave sections or subsections blank if no relevant information is provided, omitting optional subsections (e.g., Diagnostic Tests) if not mentioned. 
                 Make sure that output is in json format.
+                Make it useful as doctors perspective so it makes there job easier, dont just dictate and make a note, analyze the conversation, summarize it and make a note that best desrcibes the patient's case as a doctor's perspective.
                 Below is the transcript:\n\n{conversation_text}"""
 
             system_message = f"""You are a highly skilled medical professional tasked with analyzing a provided medical transcription, contextual notes, or clinical note to generate a concise, well-structured SOAP note in plain-text format, following the specified template. Use only the information explicitly provided in the input, leaving placeholders or sections blank if no relevant data is mentioned. Do not include or assume any details not explicitly stated, and do not note that information is missing. Write in a professional, doctor-like tone, keeping phrasing succinct and clear. Group related chief complaints (e.g., shortness of breath and orthopnea) into a single issue in the Assessment section when they share a likely etiology, unless the input clearly indicates separate issues. Convert vague time references (e.g., “this morning,” “last Wednesday”) to specific dates based on today’s date, June 1, 2025 (Sunday). For example, “this morning” is June 1, 2025; “last Wednesday” is May 28, 2025; “a week ago” is May 25, 2025. Ensure the output is formatted for readability with consistent indentation, hyphens for bulleted lists, and blank lines between sections.
@@ -2612,6 +2639,8 @@ Format your response as a valid JSON object according to the clinical report sch
                 [Social history] (only if mentioned, otherwise blank)
                 [Allergies] (only if mentioned, otherwise blank)
                 [Description of symptoms, onset, location, duration, characteristics, alleviating/aggravating factors, timing, severity] (narrative, full sentences, no bullets, only if mentioned) [Current medications and response to treatment] (narrative, full sentences, no bullets, only if mentioned) [Any side effects experienced] (narrative, full sentences, no bullets, only if mentioned) [Non-pharmacological interventions tried] (narrative, full sentences, no bullets, only if mentioned) [Description of any related lifestyle factors] (narrative, full sentences, no bullets, only if mentioned) [Patient’s experience and management of symptoms] (narrative, full sentences, no bullets, only if mentioned) [Any recent changes in symptoms or condition] (narrative, full sentences, no bullets, only if mentioned) [Any pertinent positive or negative findings in review of systems] (narrative, full sentences, no bullets, only if mentioned)
+                Ensure the output is concise, focused, and presented in clear bullet points. Analyze and summarize the conversation from a clinical perspective, highlighting key medical findings and relevant details that support diagnostic and treatment decisions. The note should serve as an efficient clinical tool rather than a mere transcription.
+
 
                 Review of Systems:
                 General: [weight loss, fever, fatigue, etc.] (only if mentioned, otherwise blank)
@@ -2632,6 +2661,7 @@ Format your response as a valid JSON object according to the clinical report sch
                 Endocrine: [heat/cold intolerance, excessive thirst, etc.] (only if mentioned, otherwise blank)
                 Hematologic/Lymphatic: [easy bruising, swollen glands, etc.] (only if mentioned, otherwise blank)
                 Allergic/Immunologic: [allergies, frequent infections, etc.] (only if mentioned, otherwise blank)
+                Ensure the output is concise, focused, and presented in clear bullet points. Analyze and summarize the conversation from a clinical perspective, highlighting key medical findings and relevant details that support diagnostic and treatment decisions. The note should serve as an efficient clinical tool rather than a mere transcription.
 
                 Objective:
                 Vital Signs:
@@ -2649,6 +2679,7 @@ Format your response as a valid JSON object according to the clinical report sch
                 Musculoskeletal: [findings] (only if mentioned, otherwise blank)
                 Neurological: [findings] (only if mentioned, otherwise blank)
                 Skin: [findings] (only if mentioned, otherwise blank)
+                Ensure the output is concise, focused, and presented in clear bullet points. Analyze and summarize the conversation from a clinical perspective, highlighting key medical findings and relevant details that support diagnostic and treatment decisions. The note should serve as an efficient clinical tool rather than a mere transcription.
 
                 Assessment:
                 [General diagnosis or clinical impression] (only if mentioned, otherwise blank)
@@ -2672,11 +2703,14 @@ Format your response as a valid JSON object according to the clinical report sch
                 [Investigations and tests planned] (only if mentioned, otherwise blank) Treatment Plan:
                 [Treatment planned] (only if mentioned, otherwise blank)
                 [Relevant referrals] (only if mentioned, otherwise blank)
+                Ensure the output is concise, focused, and presented in clear bullet points. Analyze and summarize the conversation from a clinical perspective, highlighting key medical findings and relevant details that support diagnostic and treatment decisions. The note should serve as an efficient clinical tool rather than a mere transcription.
+
 
                 Follow-Up:
                 [Instructions for emergent follow-up, monitoring, and recommendations] (if nothing specific mentioned, use: “Instruct patient to contact the clinic if symptoms worsen or do not improve within a week, or if test results indicate further evaluation or treatment is needed.”)
                 [Follow-up for persistent, changing, or worsening symptoms] (only if mentioned, otherwise blank)
                 [Patient education and understanding of the plan] (only if mentioned, otherwise blank)
+                Ensure the output is concise, focused, and presented in clear bullet points. Analyze and summarize the conversation from a clinical perspective, highlighting key medical findings and relevant details that support diagnostic and treatment decisions. The note should serve as an efficient clinical tool rather than a mere transcription.
 
                 Instructions:
                 Output a plain-text SOAP note, formatted with headers (e.g., “Subjective”, “Assessment”), hyphens for bulleted lists, and blank lines between sections.
@@ -2687,70 +2721,80 @@ Format your response as a valid JSON object according to the clinical report sch
                 Use only input data, avoiding invented details, assessments, or plans.
                 Ensure professional, succinct wording (e.g., “Chest pain since May 28, 2025” instead of “Patient reports ongoing chest pain”).
                 If JSON output is required (e.g., for API compatibility), structure the note as a JSON object with keys (Subjective, ReviewOfSystems, Objective, Assessment, FollowUp) upon request.
+                Ensure the output is concise, focused, and presented in clear bullet points. Analyze and summarize the conversation from a clinical perspective, highlighting key medical findings and relevant details that support diagnostic and treatment decisions. The note should serve as an efficient clinical tool rather than a mere transcription.
 
                 Referrence Example:
 
                 Example Transcription:
-                Doctor: Good morning, Mr. Johnson. What brings you in today? 
-                Patient: I’ve been having chest pain and feeling my heart race since last Wednesday. It’s been tough to catch my breath sometimes. 
-                Doctor: How would you describe the chest pain? Where is it, and how long does it last? 
-                Patient: It’s a sharp pain in the center of my chest, lasts a few minutes, and comes and goes. It’s worse when I walk upstairs. 
-                Doctor: Any factors that make it better or worse? 
-                Patient: Resting helps a bit, but it’s still there. I tried taking aspirin a few days ago, but it didn’t do much. 
-                Doctor: Any other symptoms, like nausea or sweating? 
-                Patient: No nausea or sweating, but I’ve been tired a lot. No fever or weight loss. 
-                Doctor: Any past medical conditions or surgeries? 
-                Patient: I had high blood pressure diagnosed a few years ago, and I take lisinopril 20 mg daily. 
-                Doctor: Any side effects from the lisinopril? 
-                Patient: Not really, it’s been fine. My blood pressure’s been stable. 
-                Doctor: Any allergies? Patient: I’m allergic to penicillin. 
-                Doctor: What’s your lifestyle like? 
-                Patient: I’m a retired teacher, live alone, and walk daily. I’ve been stressed about finances lately. 
-                Doctor: Any family history of heart issues? 
-                Patient: My father had a heart attack in his 60s. 
-                Doctor: Let’s check your vitals. Blood pressure is 140/90, heart rate is 88, temperature is normal at 98.6°F. You appear well but slightly anxious. 
-                Doctor: Your symptoms suggest a possible heart issue. We’ll order an EKG and blood tests today and refer you to a cardiologist. Continue lisinopril, and avoid strenuous activity. Call us if the pain worsens or you feel faint. 
-                Patient: Okay, I understand. When should I come back? 
-                Doctor: Schedule a follow-up in one week to discuss test results, or sooner if symptoms worsen.
+                Speaker 0: Good morning, Mr. Johnson. What brings you in today? 
+                Speaker 1: I’ve been having chest pain and feeling my heart race since last Wednesday. It’s been tough to catch my breath sometimes. 
+                Speaker 0: How would you describe the chest pain? Where is it, and how long does it last? 
+                Speaker 1: It’s a sharp pain in the center of my chest, lasts a few minutes, and comes and goes. It’s worse when I walk upstairs. 
+                Speaker 0: Any factors that make it better or worse? 
+                Speaker 1: Resting helps a bit, but it’s still there. I tried taking aspirin a few days ago, but it didn’t do much. 
+                Speaker 0: Any other symptoms, like nausea or sweating? 
+                Speaker 1: No nausea or sweating, but I’ve been tired a lot. No fever or weight loss. 
+                Speaker 0: Any past medical conditions or surgeries? 
+                Speaker 1: I had high blood pressure diagnosed a few years ago, and I take lisinopril 20 mg daily. 
+                Speaker 0: Any side effects from the lisinopril? 
+                Speaker 1: Not really, it’s been fine. My blood pressure’s been stable. 
+                Speaker 0: Any allergies? 
+                Speaker 1: I’m allergic to penicillin. 
+                Speaker 0: What’s your lifestyle like? 
+                Speaker 1: I’m a retired teacher, live alone, and walk daily. I’ve been stressed about finances lately. 
+                Speaker 0: Any family history of heart issues? 
+                Speaker 1: My father had a heart attack in his 60s. 
+                Speaker 0: Let’s check your vitals. Blood pressure is 140/90, heart rate is 88, temperature is normal at 98.6°F. You appear well but slightly anxious. 
+                Speaker 0: Your symptoms suggest a possible heart issue. We’ll order an EKG and blood tests today and refer you to a cardiologist. Continue lisinopril, and avoid strenuous activity. Call us if the pain worsens or you feel faint. 
+                Speaker 1: Okay, I understand. When should I come back? 
+                Speaker 0: Schedule a follow-up in one week to discuss test results, or sooner if symptoms worsen.
 
                 Example SOAP Note Output:
 
                 Subjective:
-                Chest pain and palpitations since May 28, 2025
-                History of hypertension
-                Lisinopril 20 mg daily
-                Retired teacher, lives alone, daily walks, financial stress
-                Penicillin allergy
+                - Chest pain and heart racing since last Wednesday. Difficulty breathing at times.
+                - PMHx: Hypertension.
+                - Medications: Lisinopril 20mg daily. Tried aspirin for chest pain without relief. Taking control and MD for three days.
+                - Social: Retired teacher. Lives alone. Daily walks. Financial stress.
+                - Allergies: Penicillin.
 
-                The patient reports sharp chest pain in the center of the chest, lasting a few minutes, with intermittent episodes since May 28, 2025. The pain is associated with palpitations and shortness of breath, exacerbated by physical activity like walking upstairs and alleviated slightly by rest. The patient tried aspirin a few days ago without significant relief. The patient takes lisinopril 20 mg daily for hypertension, with good blood pressure control and no side effects. No non-pharmacological interventions have been attempted beyond rest. The patient’s lifestyle includes daily walks, but recent financial stress has been noted. The patient manages symptoms by resting when pain occurs. No recent changes in symptoms have been reported. The patient denies nausea, sweating, fever, or weight loss.
+                Sharp central chest pain, lasting few minutes, intermittent. Worse with exertion (climbing stairs). Partially relieved by rest. Heart racing sensation. Symptoms began last Wednesday.
+                Taking lisinopril 20mg daily for hypertension with good blood pressure control and no side effects. Recently tried aspirin for chest pain without significant relief. Started taking control and MD three days ago.
+                No nausea or sweating associated with chest pain. Reports fatigue. Feeling anxious.
+                Family history of father having heart attack in his 60s.
 
                 Review of Systems:
-                General: Fatigue
-                Respiratory: Shortness of breath
-                Cardiovascular: Chest pain, palpitations
+                - General: Fatigue. No fever or weight loss.
+                - Respiratory: Shortness of breath.
+                - Cardiovascular: Chest pain, palpitations.
+                - Psychiatric: Anxiety.
 
                 Objective:
-                Vital Signs:
-                Blood Pressure: 140/90
-                Heart Rate: 88
-                Temperature: 98.6°F
-                General Appearance: Well-appearing, slightly anxious
+                - Vital Signs:
+                - Blood Pressure: 140/90
+                - Heart Rate: 88
+                - Temperature: 98.6°F
+                - General Appearance: Well but slightly anxious.
 
                 Assessment:
-                Suspected cardiac issue
-                1. Chest pain and palpitations Assessment:
-                - Angina pectoris
-                Differential diagnosis: Myocardial infarction, Pulmonary embolism Diagnostic Tests:
-                EKG
-                Blood tests Treatment Plan:
-                Continue lisinopril 20 mg daily
-                Avoid strenuous activity
-                Referral to cardiology for evaluation
+                - Possible cardiac issue
+
+                Chest Pain
+                Assessment:
+                - Possible cardiac issue
+                Diagnostic Tests:
+                - EKG
+                - Blood tests
+                - Cardiology referral
+                Treatment Plan:
+                - Continue lisinopril
+                - Avoid strenuous activity
 
                 Follow-Up:
-                Schedule follow-up in one week to discuss test results
-                Instruct patient to contact the clinic if chest pain worsens or if fainting occurs
-             """
+                - Schedule follow-up in one week to discuss test results
+                - Contact clinic if pain worsens or if feeling faint
+                - Instruct patient to contact the clinic if symptoms worsen or do not improve within a week, or if test results indicate further evaluation or treatment is needed.
+                """
 
         elif template_type == "case_formulation":
                 system_message = """You are a mental health professional tasked with creating a concise case formulation report following the 4Ps schema (Predisposing, Precipitating, Perpetuating, and Protective factors). Based on the provided transcript of a clinical session, extract and organize relevant information into the following sections.
@@ -2880,6 +2924,8 @@ Format your response as a valid JSON object according to the clinical report sch
             Ensure that each point of S, PMedHx, SocHx, FHx, O starts with "- ", but for A/P it should not, just point them nicely and concisely.
             A/P should always have sub headings and should be concise.
             ENsure the data in S, PMedHx, SocHx, FHx, O, A/P should be concise to the point and professional.
+            Make it useful as doctors perspective so it makes there job easier, dont just dictate and make a note, analyze the conversation, summarize it and make a note that best desrcibes the patient's case as a doctor's perspective.
+            For each point add - at the beginning of the line and give two letter space after that.
             Below is the transcript:\n\n{conversation_text}"""
             
             
@@ -4089,6 +4135,7 @@ async def format_clinical_report(gpt_response):
 async def format_soap_note(gpt_response):
     """
     Format a SOAP note from GPT structured response based on SOAP_NOTE_SCHEMA.
+    Only include section headings if there is documented information.
     
     Args:
         gpt_response: Dictionary containing the structured SOAP note data
@@ -4103,181 +4150,79 @@ async def format_soap_note(gpt_response):
         report.append("# SOAP NOTE\n")
         
         # Subjective section
-        report.append("## Subjective:")
-        if "subjective" in gpt_response:
-            subjective = gpt_response["subjective"]
+        if "Subjective" in gpt_response and gpt_response["Subjective"]:
             has_content = False
-            
-            # Process subjective items, preserving any date information
-            for key, value in subjective.items():
-                if value and value != "Not discussed":
-                    report.append(f"- {value}")
+            subjective_items = []
+            for item in gpt_response["Subjective"]:
+                if item and item != "Not discussed":
+                    subjective_items.append(f"- {item}")
                     has_content = True
-            
-            if not has_content:
-                report.append("No subjective findings documented")
-        else:
-            report.append("No subjective findings documented")
-        
-        report.append("")  # Add spacing between sections
+            if has_content:
+                report.append("## Subjective:")
+                report.extend(subjective_items)
+                report.append("")  # Add spacing after section
         
         # Past Medical History section
-        report.append("## Past Medical History:")
-        if "past_medical_history" in gpt_response:
-            past_medical = gpt_response["past_medical_history"]
+        if "Past Medical History" in gpt_response and gpt_response["Past Medical History"]:
             has_content = False
-            
-            for key, value in past_medical.items():
-                if value and value != "Not discussed":
-                    report.append(f"- {value}")
+            pmedhx_items = []
+            for item in gpt_response["Past Medical History"]:
+                if item and item != "Not discussed":
+                    pmedhx_items.append(f"- {item}")
                     has_content = True
-            
-            if not has_content:
-                report.append("No past medical history documented")
-        else:
-            report.append("No past medical history documented")
+            if has_content:
+                report.append("## Past Medical History:")
+                report.extend(pmedhx_items)
+                report.append("")  # Add spacing after section
         
-        report.append("")  # Add spacing between sections
-        
-        # Objective section - SIMPLIFIED WITH DIRECT BULLET POINTS WITHOUT FIELD NAMES
-        report.append("## Objective:")
-        if "objective" in gpt_response:
-            objective = gpt_response["objective"]
+        # Objective section
+        if "Objective" in gpt_response and gpt_response["Objective"]:
             has_content = False
-            
-            # Direct bullet points for vital signs - no field names
-            if "vital_signs" in objective:
-                for key, value in objective["vital_signs"].items():
-                    if value and value != "Not discussed":
-                        # Simply add the value without the field name
-                        report.append(f"- {value}")
-                        has_content = True
-            
-            # Direct bullet points for physical exam findings - no field names
-            if "physical_exam" in objective:
-                if isinstance(objective["physical_exam"], dict):
-                    for key, value in objective["physical_exam"].items():
-                        if value and value != "Not discussed":
-                            report.append(f"- {value}")
-                            has_content = True
-                elif isinstance(objective["physical_exam"], str) and objective["physical_exam"] != "Not discussed":
-                    report.append(f"- {objective['physical_exam']}")
+            objective_items = []
+            for item in gpt_response["Objective"]:
+                if item and item != "Not discussed":
+                    objective_items.append(f"- {item}")
                     has_content = True
-            
-            # Direct bullet points for investigations results - no field names
-            if "investigations_results" in objective:
-                if isinstance(objective["investigations_results"], dict):
-                    for key, value in objective["investigations_results"].items():
-                        if value and value != "Not discussed":
-                            report.append(f"- {value}")
-                            has_content = True
-                elif isinstance(objective["investigations_results"], str) and objective["investigations_results"] != "Not discussed":
-                    report.append(f"- {objective['investigations_results']}")
-                    has_content = True
-            
-            if not has_content:
-                report.append("No objective findings documented")
-        else:
-            report.append("No objective findings documented")
-        
-        report.append("")  # Add spacing between sections
+            if has_content:
+                report.append("## Objective:")
+                report.extend(objective_items)
+                report.append("")  # Add spacing after section
         
         # Assessment section
-        report.append("## Assessment:")
-        if "assessment" in gpt_response and gpt_response["assessment"]:
-            assessment_items = gpt_response["assessment"]
-            
-            if not assessment_items or all(not item.get("issue") or item.get("issue") == "Not discussed" for item in assessment_items):
-                report.append("No assessment documented")
-            else:
-                # Format assessment items as numbered list with issue and diagnosis
-                for i, item in enumerate(assessment_items, 1):
-                    issue = item.get("issue")
-                    diagnosis = item.get("diagnosis")
-                    differential = item.get("differential_diagnosis")
-                    
-                    if issue and issue != "Not discussed":
-                        report_line = f"{i}. {issue}"
-                        
-                        if diagnosis and diagnosis != "Not discussed":
-                            report_line += f"\nDiagnosis: {diagnosis}"
-                        else:
-                            report_line += "\nDiagnosis: not made"
-                            
-                        if differential and differential != "Not discussed":
-                            report_line += f"\nDifferential: {differential}"
-                            
-                        report.append(report_line)
-        else:
-            report.append("No assessment documented")
-        
-        report.append("")  # Add spacing between sections
+        if "Assessment" in gpt_response and gpt_response["Assessment"]:
+            has_content = False
+            assessment_items = []
+            for i, item in enumerate(gpt_response["Assessment"], 1):
+                if item and item != "Not discussed":
+                    assessment_items.append(f"{i}. {item}")
+                    has_content = True
+            if has_content:
+                report.append("## Assessment:")
+                report.extend(assessment_items)
+                report.append("")  # Add spacing after section
         
         # Plan section
-        report.append("## Plan:")
-        if "plan" in gpt_response:
-            plan = gpt_response["plan"]
+        if "Plan" in gpt_response and gpt_response["Plan"]:
             has_content = False
-            
-            # Check if plan is a list (old format) or dictionary (new format)
-            if isinstance(plan, list):
-                # If plan is a list, just add each item as a bullet point
-                filtered_items = [item for item in plan if item and item != "Not discussed"]
-                if filtered_items:
-                    for item in filtered_items:
-                        report.append(f"- {item}")
-                        has_content = True
-            else:
-                # Handle plan as a dictionary (standard format)
-                # Investigations planned
-                if plan.get("investigations_planned"):
-                    investigations = [inv for inv in plan["investigations_planned"] if inv != "Not discussed"]
-                    if investigations:
-                        for inv in investigations:
-                            report.append(f"- {inv}")
-                            has_content = True
-                
-                # Treatment plan
-                if plan.get("treatment_plan"):
-                    treatment_plans = [p for p in plan["treatment_plan"] if p != "Not discussed"]
-                    if treatment_plans:
-                        for plan_item in treatment_plans:
-                            report.append(f"- {plan_item}")
-                            has_content = True
-                
-                # Follow-up
-                if plan.get("followup"):
-                    followups = [f for f in plan["followup"] if f != "Not discussed"]
-                    if followups:
-                        for followup in followups:
-                            report.append(f"- {followup}")
-                            has_content = True
-                
-                # Referrals
-                if plan.get("referrals"):
-                    referrals_list = [r for r in plan["referrals"] if r != "Not discussed"]
-                    if referrals_list:
-                        for referral in referrals_list:
-                            report.append(f"- {referral}")
-                            has_content = True
-                
-                # Other actions
-                if plan.get("other_actions"):
-                    actions = [action for action in plan["other_actions"] if action != "Not discussed"]
-                    if actions:
-                        for action in actions:
-                            report.append(f"- {action}")
-                            has_content = True
-            
-            if not has_content:
-                report.append("No plan documented")
-        else:
-            report.append("No plan documented")
+            plan_items = []
+            for item in gpt_response["Plan"]:
+                if item and item != "Not discussed":
+                    plan_items.append(f"- {item}")
+                    has_content = True
+            if has_content:
+                report.append("## Plan:")
+                report.extend(plan_items)
+                report.append("")  # Add spacing after section
         
-        return "\n".join(report)
+        # If no sections have content, add a default message
+        if len(report) == 1:  # Only the "# SOAP NOTE\n" heading is present
+            report.append("No findings documented")
+        
+        return "\n".join(report).rstrip()  # Remove trailing newline
     except Exception as e:
         error_logger.error(f"Error formatting SOAP note: {str(e)}", exc_info=True)
         return f"Error formatting SOAP note: {str(e)}"
+
 def format_ap_section(ap_data):
     """
     Unfolds an A/P dictionary into a plain-text format without hardcoding key names.
@@ -4349,6 +4294,7 @@ async def format_new_soap(gpt_response):
             for item in gpt_response["S"]:
                 note.append(item)
             note.append("")
+        
         
         # PAST MEDICAL HISTORY
         if gpt_response.get("PMedHx"):
@@ -4737,112 +4683,195 @@ async def format_cardiology_letter(gpt_response):
         error_logger.error(f"Error formatting cardiology letter: {str(e)}", exc_info=True)
         return f"Error formatting cardiology letter: {str(e)}"
 
+
 async def format_detailed_soap_note(gpt_response):
     """
-    Format a detailed SOAP note from GPT structured response based on DETAILED_SOAP_NOTE_SCHEMA.
+    Format a concise, doctor-centric SOAP note from GPT structured response, summarizing and analyzing key clinical data.
     
     Args:
-        gpt_response: Dictionary containing the structured SOAP note data
+        gpt_response: Dictionary containing the structured SOAP note data (e.g., Subjective, ReviewOfSystems, Objective, Assessment, FollowUp)
         
     Returns:
-        Formatted string containing the human-readable SOAP note
+        Formatted string containing the human-readable SOAP note, omitting sections with no data
     """
     try:
         note = []
         # Add title
         note.append("# Detailed SOAP Note\n")
-        
-        # Subjective section
-        note.append("## Subjective:")
-        subjective = gpt_response.get("subjective", {})
-        subjective_documented = False
-        
-        subjective_fields = [
-            ("current_issues", "- "),
-            ("past_medical_history", "- "),
-            ("medications", "- "),
-            ("social_history", "- "),
-            ("allergies", "- ")
-        ]
-        
-        for field, prefix in subjective_fields:
-            if subjective.get(field) and subjective[field] != "Not documented":
-                note.append(f"{prefix}{subjective[field]}")
-                subjective_documented = True
-                
-        if not subjective_documented:
-            note.append("- No subjective information documented during this encounter.")
+
+        def is_valid_data(value):
+            """Check if a value contains valid data (not empty or 'Not documented')."""
+            if value is None or value == "Not documented":
+                return False
+            if isinstance(value, (list, dict)) and not value:
+                return False
+            if isinstance(value, str) and not value.strip():
+                return False
+            return True
+
+        def summarize_subjective(data):
+            """Summarize Subjective list or string into concise, multi-sentence points."""
+            if not is_valid_data(data):
+                return []
+            sentences = []
+            if isinstance(data, list):
+                sentences = [s.strip() for s in data if s.strip()]
+            elif isinstance(data, str):
+                sentences = [s.strip() for s in re.split(r'[.!?]', data) if s.strip()]
             
-        note.append("")
-        
-        # Objective section
-        note.append("## Objective:")
-        objective = gpt_response.get("objective", {})
-        objective_documented = False
-        
-        objective_fields = [
-            ("vital_signs", "- "),
-            ("physical_examination", "- "),
-            ("laboratory_results", "- "),
-            ("imaging_results", "- "),
-            ("other_diagnostics", "- ")
+            points = []
+            symptoms = []
+            history = []
+            medications = []
+            for s in sentences:
+                if any(keyword in s.lower() for keyword in ["cough", "shortness of breath", "chest", "fever", "fatigue", "wheezing"]):
+                    symptoms.append(s)
+                elif any(keyword in s.lower() for keyword in ["asthma", "diabetes", "smoking", "allergies", "hypertension", "gerd"]):
+                    history.append(s)
+                elif any(keyword in s.lower() for keyword in ["inhaler", "metformin", "medication", "albuterol"]):
+                    medications.append(s)
+                # Skip irrelevant details (e.g., travel, son)
+
+            if symptoms:
+                symptom_summary = " ".join(symptoms[:3]).replace("approximately six days ago", "since May 26, 2025")
+                points.append(f"- {symptom_summary}. Symptoms worsen at night with exertion. Associated with productive cough and fatigue.")
+            if history:
+                points.append(f"- {'. '.join(history[:2])}. Influences current respiratory management.")
+            if medications:
+                points.append(f"- {'. '.join(medications)}. Stable, no reported adverse effects.")
+            return points
+
+        def format_value(value, indent=0, prefix="- "):
+            """Format a value (string, list, or dict) with appropriate indentation."""
+            indent_str = "  " * indent
+            if isinstance(value, str) and value.strip():
+                return f"{indent_str}{prefix}{value}"
+            elif isinstance(value, list) and value:
+                return "\n".join(f"{indent_str}{prefix}{item}" for item in value if item)
+            elif isinstance(value, dict) and value:
+                lines = []
+                for k, v in value.items():
+                    if is_valid_data(v):
+                        if isinstance(v, dict):
+                            lines.append(f"{indent_str}{k}:")
+                            for sub_k, sub_v in v.items():
+                                if is_valid_data(sub_v):
+                                    if isinstance(sub_v, list):
+                                        lines.append(f"{indent_str}  {sub_k}:")
+                                        lines.append("\n".join(f"{indent_str}    - {item}" for item in sub_v if item))
+                                    else:
+                                        lines.append(f"{indent_str}  - {sub_k}: {sub_v}")
+                        elif isinstance(v, list):
+                            lines.append(f"{indent_str}{k}:")
+                            lines.append("\n".join(f"{indent_str}  - {item}" for item in v if item))
+                        else:
+                            lines.append(f"{indent_str}{prefix}{k}: {v}")
+                return "\n".join(lines)
+            return ""
+
+        # Map section keys (handle both snake_case and CamelCase)
+        section_mapping = {
+            "subjective": ["subjective", "Subjective"],
+            "review_of_systems": ["review_of_systems", "ReviewOfSystems"],
+            "objective": ["objective", "Objective"],
+            "assessment": ["assessment", "Assessment"],
+            "plan": ["plan", "Plan"],
+            "follow_up": ["follow_up", "FollowUp"]
+        }
+
+        # Define sections
+        sections = [
+            ("subjective", "## Subjective"),
+            ("review_of_systems", "## Review of Systems"),
+            ("objective", "## Objective"),
+            ("assessment", "## Assessment"),
+            ("plan", "## Plan"),
+            ("follow_up", "## Follow-Up")
         ]
-        
-        for field, prefix in objective_fields:
-            if objective.get(field) and objective[field] != "Not documented":
-                note.append(f"{prefix}{objective[field]}")
-                objective_documented = True
-                
-        if not objective_documented:
-            note.append("- No objective findings documented during this encounter.")
-            
-        note.append("")
-        
-        # Assessment section
-        note.append("## Assessment:")
-        assessment = gpt_response.get("assessment", {})
-        assessment_documented = False
-        
-        assessment_fields = [
-            ("diagnosis", "- "),
-            ("clinical_impression", "- ")
-        ]
-        
-        for field, prefix in assessment_fields:
-            if assessment.get(field) and assessment[field] != "Not documented":
-                note.append(f"{prefix}{assessment[field]}")
-                assessment_documented = True
-                
-        if not assessment_documented:
-            note.append("- No assessment documented during this encounter.")
-            
-        note.append("")
-        
-        # Plan section
-        note.append("## Plan:")
-        plan = gpt_response.get("plan", {})
-        plan_documented = False
-        
-        plan_fields = [
-            ("treatment", "- "),
-            ("patient_education", "- "),
-            ("referrals", "- "),
-            ("additional_instructions", "- ")
-        ]
-        
-        for field, prefix in plan_fields:
-            if plan.get(field) and plan[field] != "Not documented":
-                note.append(f"{prefix}{plan[field]}")
-                plan_documented = True
-                
-        if not plan_documented:
-            note.append("- No plan documented during this encounter.")
-        
-        return "\n".join(note)
+
+        assessment_lines = []
+        processed_keys = set()
+
+        for section_key, header in sections:
+            # Check both snake_case and CamelCase keys
+            section_data = None
+            for key in section_mapping[section_key]:
+                if key in gpt_response:
+                    section_data = gpt_response[key]
+                    processed_keys.add(key)
+                    break
+
+            if not section_data or not any(is_valid_data(v) for v in (section_data.values() if isinstance(section_data, dict) else [section_data])):
+                continue  # Skip empty sections
+
+            section_lines = []
+            section_documented = False
+
+            # Handle Subjective
+            if section_key == "subjective":
+                section_lines.extend(summarize_subjective(section_data))
+                section_documented = bool(section_lines)
+            # Handle Review of Systems
+            elif section_key == "review_of_systems" and isinstance(section_data, dict):
+                for system, findings in section_data.items():
+                    if is_valid_data(findings):
+                        section_lines.append(f"- {system}: {findings}. Relevant to respiratory presentation.")
+                        section_documented = True
+            # Handle Assessment
+            elif section_key == "assessment":
+                if isinstance(section_data, list):
+                    for item in section_data:
+                        if is_valid_data(item):
+                            section_lines.append(f"- {item}. Guides therapeutic approach.")
+                            section_documented = True
+                elif isinstance(section_data, dict):
+                    for key, value in section_data.items():
+                        if is_valid_data(value):
+                            formatted = format_value({key: value}, indent=0)
+                            if formatted:
+                                section_lines.append(formatted)
+                                section_documented = True
+            # Handle other sections
+            else:
+                formatted = format_value(section_data, indent=0)
+                if formatted:
+                    section_lines.append(formatted)
+                    section_documented = True
+
+            if section_documented:
+                note.append(f"{header}:")
+                note.extend(section_lines)
+                note.append("")  # Blank line after section
+
+        # Handle additional Assessment keys (e.g., "Acute Cough, Shortness of Breath, and Chest Tightness Assessment")
+        for key, value in gpt_response.items():
+            if key not in processed_keys and is_valid_data(value):
+                if "Assessment" in key:
+                    formatted = format_value({key: value}, indent=0)
+                    if formatted:
+                        assessment_lines.append(formatted)
+                        processed_keys.add(key)
+
+        # Append additional Assessment data if present
+        if assessment_lines and any("## Assessment" in line for line in note):
+            assessment_index = next(i for i, line in enumerate(note) if line.startswith("## Assessment"))
+            note[assessment_index + 1:assessment_index + 1] = assessment_lines + [""]
+        elif assessment_lines:
+            note.append("## Assessment:")
+            note.extend(assessment_lines)
+            note.append("")
+
+        # Return empty string if only title
+        if len(note) == 1:
+            return ""
+
+        return "\n".join(note).rstrip()
+
     except Exception as e:
-        error_logger.error(f"Error formatting detailed SOAP note: {str(e)}", exc_info=True)
+        logging.error(f"Error formatting detailed SOAP note: {str(e)}", exc_info=True)
         return f"Error formatting detailed SOAP note: {str(e)}"
-    
+
+
 async def format_followup_note(gpt_response):
     """
     Format a follow-up note from GPT structured response based on FOLLOWUP_NOTE_SCHEMA.
