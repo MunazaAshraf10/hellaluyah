@@ -2945,6 +2945,8 @@ Format your response as a valid JSON object according to the clinical report sch
             Note impact on daily life, work, or activities.
             Include associated focal or systemic symptoms.
             List complaints clearly, avoiding redundancy.
+            Make sure nothing is repeated in the subjective section. For each thing summarize it in a concise one point.
+            Ensure you are not missing any point.
             Keep each point concise and to the point and in new line with "- " at the beginning of the line.
 
             PMedHx:
