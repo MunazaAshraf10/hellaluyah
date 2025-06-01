@@ -2949,33 +2949,33 @@ Format your response as a valid JSON object according to the clinical report sch
 
             PMedHx:
             List contributing factors, including past medical/surgical history, investigations, and treatments relevant to the complaints.
-            Include exposure history if mentioned
+            Include exposure history if mentioned.
             Include immunization history and status if provided.
             Note other relevant subjective information if provided.
-            If the patient has not provided any information about the past medical history, then do not include it in the PMedHx section.
-            If the patient dont have any history as discussed in the conversation and contexually the patient appears to be healthy then write "No medical conditions" otherwise write the medical conditions in the format discussed in this section.
-            If the patient is not taking any medications then write "No medications" but if the patient is taking medications list the medications dosage and frequency.
+            If the patient has not provided any information about the past medical history, do not include this section.
+            If the patient does not have any medical history as discussed in the conversation and contextually appears healthy, do not include this section.
+            If the patient is not taking any medications, do not include medication details, but include other relevant medical history if provided.
+            If the patient is taking medications, list the medications, dosage, and frequency.
             Keep each point concise and to the point and in new line with "- " at the beginning of the line.
 
             SocHx:
             List social history relevant to the complaints.
-            Only list the social history if it is relevant to the complaints.
-            Keep each point concise and to the point and in new line with "- " at the beginning of the line. 
+            Only include this section if social history is relevant to the complaints.
+            Keep each point concise and to the point and in new line with "- " at the beginning of the line.
 
             FHx:
             List family history relevant to the complaints.
-            Only list the family history if it is relevant to the complaints.
+            Only include this section if family history is relevant to the complaints.
             Keep each point concise and to the point and in new line with "- " at the beginning of the line.
 
             O:
-            Report vital signs as: BP:, HR:, Wt:, T:, O2:, Ht:.
             Include only objective findings explicitly mentioned in the transcription (e.g., vital signs, specific exam results).
-            If no physical exam findings are provided, state “NAD” (no apparent distress) as the first line, followed by available vitals, and note “Investigations: None performed during visit” if no tests were done.
-            If CVS exam is normal, report as “N S1 and S2, no murmurs or extra beats.”
-            If respiratory exam is normal, report as “Resp: Chest clear, no decr breath sounds.”
-            If abdominal exam is normal, report as “No distension, BS+, soft, non-tender to palpation and percussion. No organomegaly.”
-            For psychiatry-related appointments, include: “Appears well, appropriately dressed for occasion. Normal speech. Reactive affect. No perceptual abnormalities. Normal thought form and content. Intact insight and judgement. Cognition grossly normal.”
-            Do not include unmentioned exam findings or deductive statements.
+            If vital signs are provided, report as: BP:, HR:, Wt:, T:, O2:, Ht:.
+            If CVS exam is explicitly stated as normal, report as: “N S1 and S2, no murmurs or extra beats.”
+            If respiratory exam is explicitly stated as normal, report as: “Resp: Chest clear, no decr breath sounds.”
+            If abdominal exam is explicitly stated as normal, report as: “No distension, BS+, soft, non-tender to palpation and percussion. No organomegaly.”
+            For psychiatry-related appointments, if explicitly mentioned, include: “Appears well, appropriately dressed for occasion. Normal speech. Reactive affect. No perceptual abnormalities. Normal thought form and content. Intact insight and judgement. Cognition grossly normal.”
+            Do not include this section if no objective findings or exam results are provided in the transcription.
             Keep each point concise and to the point and in new line with "- " at the beginning of the line.
 
             A/P:
@@ -2983,9 +2983,9 @@ Format your response as a valid JSON object according to the clinical report sch
             - State the issue or group of symptoms (e.g., “Fatigue and headache”).
             - Provide the likely diagnosis (condition name only) with Diagnosis Heading.
             - List differential diagnoses.
-            - List planned investigations.
-            - List planned treatments.
-            - List relevant referrals and follow ups with timelines if mentioned. 
+            - List planned investigations and if no investigations are planned then write nothing ignore the points related to investigations.
+            - List planned treatments if discussed in the conversation otherwise write nothing and ignore the points related to treatments.
+            - List relevant referrals and follow ups with timelines if mentioned otherwise write nothing and ignore the points related to referrals and follow ups.
             - If the have multiple treatments then list them in new line.
             Ensure A/P aligns with S, grouping related complaints unless explicitly separate.
 
