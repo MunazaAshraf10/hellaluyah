@@ -2926,6 +2926,8 @@ Format your response as a valid JSON object according to the clinical report sch
             ENsure the data in S, PMedHx, SocHx, FHx, O, A/P should be concise to the point and professional.
             Make it useful as doctors perspective so it makes there job easier, dont just dictate and make a note, analyze the conversation, summarize it and make a note that best desrcibes the patient's case as a doctor's perspective.
             For each point add - at the beginning of the line and give two letter space after that.
+            Add time related information in the report dont miss them.
+            Make sure the point are concise and structured and looks professional.
             Below is the transcript:\n\n{conversation_text}"""
             
             
