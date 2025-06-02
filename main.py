@@ -4226,7 +4226,6 @@ async def format_soap_note(gpt_response):
     except Exception as e:
         error_logger.error(f"Error formatting SOAP note: {str(e)}", exc_info=True)
         return f"Error formatting SOAP note: {str(e)}"
-
 def format_ap_section(ap_data):
     """
     Unfolds an A/P dictionary into a plain-text format without hardcoding key names.
@@ -4252,29 +4251,22 @@ def format_ap_section(ap_data):
     # Iterate through top-level keys (e.g., "1", "2") as entry numbers
     for entry_key, entry_value in sorted(ap_data.items(), key=lambda x: int(x[0]) if x[0].isdigit() else x[0]):
         if isinstance(entry_value, dict):
-            # Start with entry number
-            issue = None
-            for key, val in entry_value.items():
-                if isinstance(val, str) and not issue:  # Assume first string is the issue
-                    issue = val
-                    output.append(f"{entry_key}. {val}")
-                    break
+            # Start with entry number and main issue
+            main_issue = entry_key.split(". ", 1)[1] if ". " in entry_key else entry_key
+            output.append(f"{entry_key}")
+            
             # Format remaining key-value pairs
             for key, val in entry_value.items():
-                if val and not isinstance(val, str):  # Handle lists or dicts
-                    formatted = format_value(val, 1)
+                if val:  # Only process non-empty values
+                    formatted = format_value(val, 0)
                     if formatted.strip():
-                        output.append(f"{key}:")
-                        output.append(formatted)
-                elif val and issue != val:  # Handle other strings (e.g., Diagnosis)
-                    output.append(f"{key}: {val}")
+                        output.append(f"{key}: {formatted}")
             output.append("")  # Blank line between entries
         else:
             output.append(f"{entry_key}: {format_value(entry_value, 1)}")
             output.append("")
 
     return output
-
 
 async def format_new_soap(gpt_response):
     """
