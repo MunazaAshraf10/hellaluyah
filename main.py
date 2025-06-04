@@ -1564,22 +1564,35 @@ async def generate_template_report(
         template_type: Type of template report to generate
     """
     try:
+        # Initialize status tracking
+        report_status = "processing"
+        report_id = None
+        gpt_response = None
+        formatted_report = None
+
         # Validate template type
         valid_templates = ["clinical_report","new_soap_note", "detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes","pathology_note", "consult_note","discharge_summary","case_formulation"]
+        
         if template_type not in valid_templates:
             error_msg = f"Invalid template type '{template_type}'. Must be one of: {', '.join(valid_templates)}"
             error_logger.error(error_msg)
-            return JSONResponse({"error": error_msg}, status_code=400)
+            return JSONResponse({
+                "status": "failed",
+                "error": error_msg,
+                "report_status": "failed"
+            }, status_code=400)
             
         # Get transcript data
         table = dynamodb.Table('transcripts')
         response = table.get_item(Key={"id": transcript_id})
         
         if 'Item' not in response:
-            return JSONResponse(
-                {"error": f"Transcript ID {transcript_id} not found"},
-                status_code=404
-            )
+            return JSONResponse({
+                "status": "failed",
+                "error": f"Transcript ID {transcript_id} not found",
+                "report_status": "failed"
+            }, status_code=404)
+            
         transcript_item = response['Item']
         
         # Get transcript data
@@ -1592,54 +1605,96 @@ async def generate_template_report(
             transcript_data = transcript_data.decode('utf-8')
         elif isinstance(transcript_data, bytes):
             transcript_data = decrypt_data(transcript_data).decode('utf-8')
-        print(f"Transcript data: {transcript_data}")
+            
         # Now parse the JSON
         try:
             transcription = json.loads(transcript_data)
         except json.JSONDecodeError:
-            return JSONResponse(
-                {"error": "Invalid transcript data format"},
-                status_code=400
+            return JSONResponse({
+                "status": "failed",
+                "error": "Invalid transcript data format",
+                "report_status": "failed"
+            }, status_code=400)
+
+        try:
+            # Generate GPT response
+            main_logger.info(f"Generating {template_type} template for transcript {transcript_id}")
+            gpt_response = await generate_gpt_response(transcription, template_type)
+            
+            if isinstance(gpt_response, str) and gpt_response.startswith("Error"):
+                report_status = "failed"
+                return JSONResponse({
+                    "status": "failed",
+                    "error": gpt_response,
+                    "report_status": report_status
+                }, status_code=400)
+            
+            # Format the report
+            formatted_report = await format_report(gpt_response, template_type)
+            
+            if isinstance(formatted_report, str) and formatted_report.startswith("Error"):
+                report_status = "failed"
+                return JSONResponse({
+                    "status": "failed",
+                    "error": formatted_report,
+                    "report_status": report_status
+                }, status_code=400)
+            
+            # Save report to database
+            report_id = await save_report_to_dynamodb(
+                transcript_id,
+                gpt_response,
+                formatted_report,
+                template_type,
+                status=report_status
             )
             
-        # Generate GPT response
-        main_logger.info(f"Generating {template_type} template for transcript {transcript_id}")
-        gpt_response = await generate_gpt_response(transcription, template_type)
-        
-        if isinstance(gpt_response, str) and gpt_response.startswith("Error"):
-            return JSONResponse({"error": gpt_response}, status_code=400)
-        
-        # Format the report
-        formatted_report = await format_report(gpt_response, template_type)
-        
-        if isinstance(formatted_report, str) and formatted_report.startswith("Error"):
-            return JSONResponse({"error": formatted_report}, status_code=400)
-        
-        # Save report to database
-        report_id = await save_report_to_dynamodb(
-            transcript_id,
-            gpt_response,
-            formatted_report,
-            template_type,
-            status="completed"
-        )
-        
-        # Return the formatted report
-        response_data = {
-            "report_id": report_id,
-            "template_type": template_type,
-            "gpt_response": json.loads(gpt_response) if gpt_response else None,
-            "formatted_report": formatted_report
-        }
-        
-        main_logger.info(f"Template report generation completed successfully")
-        return JSONResponse(response_data)
-        
+            report_status = "completed"
+            
+            # Return the complete response
+            response_data = {
+                "status": "success",
+                "report_status": report_status,
+                "transcript_id": transcript_id,
+                "report_id": report_id,
+                "template_type": template_type,
+                "gpt_response": json.loads(gpt_response) if gpt_response else None,
+                "formatted_report": formatted_report
+            }
+            
+            main_logger.info(f"Report generation completed successfully")
+            return JSONResponse(response_data)
+
+        except Exception as e:
+            error_msg = f"Error during processing: {str(e)}"
+            error_logger.exception(error_msg)
+            
+            # Update status in DynamoDB if we have ID
+            if report_id:
+                await save_report_to_dynamodb(
+                    transcript_id,
+                    gpt_response,
+                    formatted_report,
+                    template_type,
+                    status="failed"
+                )
+            
+            return JSONResponse({
+                "status": "failed",
+                "error": error_msg,
+                "report_status": report_status,
+                "report_id": report_id
+            }, status_code=500)
+
     except Exception as e:
         error_msg = f"Unexpected error in generate_template_report: {str(e)}"
         error_logger.exception(error_msg)
-        return JSONResponse({"error": error_msg}, status_code=500)
-
+        return JSONResponse({
+            "status": "failed",
+            "error": error_msg,
+            "report_status": "failed"
+        }, status_code=500)
+        
 # Update WebSocket endpoint to focus just on live transcription without template generation
 @app.websocket("/ws/live-transcription")
 async def live_transcription_endpoint(websocket: WebSocket):
@@ -2915,8 +2970,8 @@ Format your response as a valid JSON object according to the clinical report sch
             Analyze the transcript and generate a structured SOAP note following the specified template. 
             Use only the information explicitly provided in the transcript, and do not include or assume any additional details. 
             Ensure the output is a valid JSON object with the SOAP note sections (S, PMedHx, SocHx, FHx, O, A/P) as keys, formatted professionally and concisely in a doctor-like tone. 
-            Address all chief complaints and issues separately in the S and A/P sections.
-            Make sure the output is in valid JSON format.
+            Address all chief complaints and issues separately in the S and A/P sections. 
+            Make sure the output is in valid JSON format. 
             If the patient didnt provide the information regarding (S, PMedHx, SocHx, FHx, O, A/P) then ignore the respective section.
             For time references (e.g., “this morning,” “last Wednesday”), convert to specific dates based on today’s date, June 1, 2025 (Sunday). For example, “this morning” is June 1, 2025; “last Wednesday” is May 28, 2025; “a week ago” is May 25, 2025
             Include the all numbers in numeric format.
@@ -5504,21 +5559,20 @@ async def get_report_history():
             {"error": f"Failed to retrieve report history: {str(e)}"},
             status_code=500
         )
-
 @app.post("/transcribe-audio")
 @log_execution_time
 async def transcribe_audio(
     audio: UploadFile = File(...)
 ):
     """
-    Transcribe an audio file and store the transcription in the transcripts table.
+    Transcribe an audio file and save the result to DynamoDB.
     
     Args:
         audio: WAV audio file to process
     """
     try:
         # Log incoming request details
-        main_logger.info(f"Received audio transcription request - Filename: {audio.filename}, Content-Type: {audio.content_type}")
+        main_logger.info(f"Received transcribe request - Filename: {audio.filename}, Content-Type: {audio.content_type}")
 
         # Validate content type
         valid_content_types = [
@@ -5549,43 +5603,91 @@ async def transcribe_audio(
             else:
                 error_msg = f"Invalid audio format. Expected audio file, got {audio.content_type}"
                 error_logger.error(error_msg)
-                return JSONResponse({"error": error_msg}, status_code=400)
+                return JSONResponse({
+                    "status": "failed",
+                    "error": error_msg,
+                    "transcription_status": "failed"
+                }, status_code=400)
 
         # Read the audio file
         audio_data = await audio.read()
         if not audio_data:
             error_msg = "No audio data provided"
             error_logger.error(error_msg)
-            return JSONResponse({"error": error_msg}, status_code=400)
+            return JSONResponse({
+                "status": "failed",
+                "error": error_msg,
+                "transcription_status": "failed"
+            }, status_code=400)
 
         main_logger.info(f"Audio file read successfully. Size: {len(audio_data)} bytes")
 
-        # Transcribe audio
-        transcription_result = await transcribe_audio_with_diarization(audio_data)
-        
-        # Save transcription to DynamoDB
-        transcript_id = await save_transcript_to_dynamodb(
-            transcription_result,
-            None,  # No audio info needed for this endpoint
-            status="completed"
-        )
-        
-        if not transcript_id:
-            error_msg = "Failed to save transcription to DynamoDB"
-            error_logger.error(error_msg)
-            return JSONResponse({"error": error_msg}, status_code=500)
-        
-        # Return the transcription result
-        return JSONResponse({
-            "transcript_id": transcript_id,
-            "transcription": transcription_result
-        })
+        # Initialize status tracking
+        transcription_status = "processing"
+        transcript_id = None
+        transcription_result = None
+
+        try:
+            # Transcribe audio
+            transcription_result = await transcribe_audio_with_diarization(audio_data)
+            transcription_status = "completed"
+            
+            # Save transcription to DynamoDB
+            transcript_id = await save_transcript_to_dynamodb(
+                transcription_result,
+                None,  # No audio info needed for this endpoint
+                status=transcription_status
+            )
+            
+            if not transcript_id:
+                transcription_status = "failed"
+                error_msg = "Failed to save transcription to DynamoDB"
+                error_logger.error(error_msg)
+                return JSONResponse({
+                    "status": "failed",
+                    "error": error_msg,
+                    "transcription_status": transcription_status
+                }, status_code=500)
+
+            # Return the complete response
+            response_data = {
+                "status": "success",
+                "transcription_status": transcription_status,
+                "transcript_id": transcript_id,
+                "transcription": transcription_result
+            }
+            
+            main_logger.info(f"Transcription completed successfully")
+            return JSONResponse(response_data)
+
+        except Exception as e:
+            error_msg = f"Error during processing: {str(e)}"
+            error_logger.exception(error_msg)
+            
+            # Update status in DynamoDB if we have ID
+            if transcript_id:
+                await save_transcript_to_dynamodb(
+                    transcription_result,
+                    None,
+                    status="failed"
+                )
+            
+            return JSONResponse({
+                "status": "failed",
+                "error": error_msg,
+                "transcription_status": transcription_status,
+                "transcript_id": transcript_id
+            }, status_code=500)
 
     except Exception as e:
         error_msg = f"Unexpected error in transcribe_audio: {str(e)}"
         error_logger.exception(error_msg)
-        return JSONResponse({"error": error_msg}, status_code=500)
-
+        return JSONResponse({
+            "status": "failed",
+            "error": error_msg,
+            "transcription_status": "failed"
+        }, status_code=500)
+        
 @app.get("/search")
 async def search_data(
     summary_id: str = None,
@@ -6946,7 +7048,208 @@ async def dynamodb_scan_all(table, **kwargs):
             break
     return items
 
+@app.post("/transcribe-and-generate-report")
+@log_execution_time
+async def transcribe_and_generate_report(
+    audio: UploadFile = File(...),
+    template_type: str = Form("new_soap_note")
+):
+    """
+    Transcribe an audio file and generate a report in one step.
+    
+    Args:
+        audio: WAV audio file to process
+        template_type: Type of template report to generate
+    """
+    try:
+        # Log incoming request details
+        main_logger.info(f"Received transcribe and generate report request - Filename: {audio.filename}, Content-Type: {audio.content_type}, Template: {template_type}")
 
+        # Validate content type
+        valid_content_types = [
+            # WAV formats
+            "audio/wav", "audio/wave", "audio/x-wav",
+            # MP3 formats
+            "audio/mp3", "audio/mpeg", "audio/mpeg3", "audio/x-mpeg-3",
+            # MP4/M4A formats
+            "audio/mp4", "audio/x-m4a", "audio/m4a",
+            # FLAC formats
+            "audio/flac", "audio/x-flac",
+            # AAC formats
+            "audio/aac", "audio/x-aac",
+            # OGG formats
+            "audio/ogg", "audio/vorbis", "application/ogg",
+            # WEBM formats
+            "audio/webm",
+            # Other common audio formats
+            "audio/3gpp", "audio/amr"
+        ]
 
+        if audio.content_type not in valid_content_types:
+            # Allow files with missing content type but with audio file extensions
+            valid_extensions = [".wav", ".mp3", ".mp4", ".m4a", ".flac", ".aac", ".ogg", ".webm", ".amr", ".3gp"]
+            file_extension = os.path.splitext(audio.filename.lower())[1]
+            if file_extension in valid_extensions:
+                main_logger.info(f"Audio content-type not recognized ({audio.content_type}), but filename has valid extension: {file_extension}")
+            else:
+                error_msg = f"Invalid audio format. Expected audio file, got {audio.content_type}"
+                error_logger.error(error_msg)
+                return JSONResponse({
+                    "status": "failed",
+                    "error": error_msg,
+                    "transcription_status": "failed",
+                    "report_status": "not_started"
+                }, status_code=400)
 
+        # Validate template type
+        valid_templates = ["clinical_report","new_soap_note", "detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes","pathology_note", "consult_note","discharge_summary","case_formulation"]
+        
+        if template_type not in valid_templates:
+            error_msg = f"Invalid template type '{template_type}'. Must be one of: {', '.join(valid_templates)}"
+            error_logger.error(error_msg)
+            return JSONResponse({
+                "status": "failed",
+                "error": error_msg,
+                "transcription_status": "failed",
+                "report_status": "not_started"
+            }, status_code=400)
+
+        # Read the audio file
+        audio_data = await audio.read()
+        if not audio_data:
+            error_msg = "No audio data provided"
+            error_logger.error(error_msg)
+            return JSONResponse({
+                "status": "failed",
+                "error": error_msg,
+                "transcription_status": "failed",
+                "report_status": "not_started"
+            }, status_code=400)
+
+        main_logger.info(f"Audio file read successfully. Size: {len(audio_data)} bytes")
+
+        # Initialize status tracking
+        transcription_status = "processing"
+        report_status = "not_started"
+        transcript_id = None
+        report_id = None
+        transcription_result = None
+        gpt_response = None
+        formatted_report = None
+
+        try:
+            # Transcribe audio
+            transcription_result = await transcribe_audio_with_diarization(audio_data)
+            transcription_status = "completed"
             
+            # Save transcription to DynamoDB
+            transcript_id = await save_transcript_to_dynamodb(
+                transcription_result,
+                None,  # No audio info needed for this endpoint
+                status=transcription_status
+            )
+            
+            if not transcript_id:
+                transcription_status = "failed"
+                error_msg = "Failed to save transcription to DynamoDB"
+                error_logger.error(error_msg)
+                return JSONResponse({
+                    "status": "failed",
+                    "error": error_msg,
+                    "transcription_status": transcription_status,
+                    "report_status": report_status
+                }, status_code=500)
+
+            # Generate GPT response
+            main_logger.info(f"Generating {template_type} template for transcript {transcript_id}")
+            report_status = "processing"
+            gpt_response = await generate_gpt_response(transcription_result, template_type)
+            
+            if isinstance(gpt_response, str) and gpt_response.startswith("Error"):
+                report_status = "failed"
+                return JSONResponse({
+                    "status": "failed",
+                    "error": gpt_response,
+                    "transcription_status": transcription_status,
+                    "report_status": report_status,
+                    "transcript_id": transcript_id
+                }, status_code=400)
+            
+            # Format the report
+            formatted_report = await format_report(gpt_response, template_type)
+            
+            if isinstance(formatted_report, str) and formatted_report.startswith("Error"):
+                report_status = "failed"
+                return JSONResponse({
+                    "status": "failed",
+                    "error": formatted_report,
+                    "transcription_status": transcription_status,
+                    "report_status": report_status,
+                    "transcript_id": transcript_id
+                }, status_code=400)
+            
+            # Save report to database
+            report_id = await save_report_to_dynamodb(
+                transcript_id,
+                gpt_response,
+                formatted_report,
+                template_type,
+                status=report_status
+            )
+            
+            report_status = "completed"
+            
+            # Return the complete response
+            response_data = {
+                "status": "success",
+                "transcription_status": transcription_status,
+                "report_status": report_status,
+                "transcript_id": transcript_id,
+                "report_id": report_id,
+                "template_type": template_type,
+                "transcription": transcription_result,
+                "gpt_response": json.loads(gpt_response) if gpt_response else None,
+                "formatted_report": formatted_report
+            }
+            
+            main_logger.info(f"Transcribe and generate report completed successfully")
+            return JSONResponse(response_data)
+
+        except Exception as e:
+            error_msg = f"Error during processing: {str(e)}"
+            error_logger.exception(error_msg)
+            
+            # Update status in DynamoDB if we have IDs
+            if transcript_id:
+                await save_transcript_to_dynamodb(
+                    transcription_result,
+                    None,
+                    status="failed"
+                )
+            if report_id:
+                await save_report_to_dynamodb(
+                    transcript_id,
+                    gpt_response,
+                    formatted_report,
+                    template_type,
+                    status="failed"
+                )
+            
+            return JSONResponse({
+                "status": "failed",
+                "error": error_msg,
+                "transcription_status": transcription_status,
+                "report_status": report_status,
+                "transcript_id": transcript_id,
+                "report_id": report_id
+            }, status_code=500)
+
+    except Exception as e:
+        error_msg = f"Unexpected error in transcribe_and_generate_report: {str(e)}"
+        error_logger.exception(error_msg)
+        return JSONResponse({
+            "status": "failed",
+            "error": error_msg,
+            "transcription_status": "failed",
+            "report_status": "not_started"
+        }, status_code=500)
