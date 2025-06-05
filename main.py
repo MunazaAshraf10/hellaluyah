@@ -1213,7 +1213,7 @@ async def upload_audio(
                 return JSONResponse({"error": error_msg}, status_code=400)
 
         # Validate template type
-        valid_templates = ["clinical_report", "new_soap_note","detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes", "pathology_note", "consult_note","discharge_summary","case_formulation"]
+        valid_templates = ["clinical_report", "new_soap_note","soap_issues","detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes", "pathology_note", "consult_note","discharge_summary","case_formulation"]
         main_logger.info(f"[REQ-{request_id}] Valid templates: {valid_templates}")
         main_logger.info(f"[REQ-{request_id}] Is template_type in valid_templates? {template_type in valid_templates}")
         
@@ -1571,7 +1571,7 @@ async def generate_template_report(
         formatted_report = None
 
         # Validate template type
-        valid_templates = ["clinical_report","new_soap_note", "detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes","pathology_note", "consult_note","discharge_summary","case_formulation"]
+        valid_templates = ["clinical_report","new_soap_note","soap_issues" ,"detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes","pathology_note", "consult_note","discharge_summary","case_formulation"]
         
         if template_type not in valid_templates:
             error_msg = f"Invalid template type '{template_type}'. Must be one of: {', '.join(valid_templates)}"
@@ -2240,146 +2240,558 @@ CRITICAL GRAMMAR INSTRUCTIONS:
             """
         
         elif template_type == "referral_letter":
-            system_message = f"""You are a medical documentation expert specializing in professional referral letters.
-        {preservation_instructions}
-        {grammar_instructions}
 
-        CRITICAL STYLE INSTRUCTIONS:
-        1. Write as a doctor would write - using professional medical terminology and standard medical abbreviations
-        2. Be CONCISE and DIRECT in your documentation 
-        3. Use FULL SENTENCES, never bullet points in the final document
-        4. Format the letter exactly according to the structure provided
-        5. Only include information explicitly mentioned in the transcript
-        6. Always preserve all dates, medication dosages, and measurements EXACTLY as stated
-        7. When information is not available in the transcript, do not include placeholder text - simply leave that section blank
+            user_instructions= f"""You are provided with a medical conversation transcript. 
+            Analyze the transcript and generate a structured Referral letter following the specified template. 
+            Use only the information explicitly provided in the transcript, and do not include or assume any additional details. 
+            Ensure the output is a valid JSON object with the Referral letter sections heaings as keys, formatted professionally and concisely in a doctor-like tone. 
+            Make sure the output is in valid JSON format. 
+            If the patient didnt provide the information regarding any field then ignore the respective section.
+            For time references (e.g., “this morning,” “last Wednesday”), convert to specific dates based on today’s date, current day's date whatever it is on calender.
+            Include the all numbers in numeric format.
+            Make sure the output is concise and to the point.
+            ENsure the data in all letter should be to the point and professional.
+            Make it useful as doctors perspective so it makes there job easier, dont just dictate and make a letter, analyze the conversation, summarize it and make a note that best desrcibes the patient's case as a doctor's perspective.
+            For each point add - at the beginning of the line and give two letter space after that.
+            Add time related information in the report dont miss them.
+            Make sure the point are structured and looks professional and uses medical terms to describe everything.
+            Use medical terms to describe each thing
+            Dont repeat anyything dude please.
+            Include sub-headings as specified below in format in output
+            ADD "[Practice Letterhead]"  if pratice name is not available or you are not able to analyze what it could be.
+            ADD "Dr. [Consultant’s Name] " if doctor whom the case was referred to is not known.
+            Add "[Specialist Clinic/Hospital Name]" if the name of the hospital not known
+            add ''[Address Line 1]
+            [Address Line 2]''' i address is not known
+            add "[City, Postcode]" if city and postcode unknown.
+            Add "Dear Dr. [Consultant's Last Name]",  if doctor whom the case was referred to is not known otherwise use doctor's name
+            Add this line "Enclosed are [e.g., relevant test results, imaging reports] for your review. Please do not hesitate to contact me if you require further information." only if test results were available.
+            Add "Re: Referral for [Patient's Name], [Date of Birth: DOB]" if patient name and dob is not known otherwise write the values here.
+            Write "[Your Full Name]" if name of the doctor that is referring is unknown (try to see if the patient ever called the doctor by its name in conversation that is bascially the doctor name).
+            Write "[Your Title]" if title of the doctor that is referring is unknown (try to see if the title of doctor was disclosed in conversation that is bascially the doctor's tittle or try to analyze who it can be by analyzing conversation).
+            Below is the transcript:\n\n{conversation_text}
+            """
+            system_message = f"""You are a medical documentation AI tasked with creating a referral letter based solely on the information provided in a conversation transcript, contextual notes, or clinical note. 
+            Your goal is to produce a professional, concise, and accurate referral letter that adheres to the template below. 
+            The letter must be written in full sentences, avoid bullet points, and include only information explicitly mentioned in the provided data. 
+            Do not infer, assume, or add any details not explicitly stated. 
+            If information for a specific section or placeholder is missing, leave that section or placeholder blank without indicating that the information was not provided. 
+            The output must be formatted as plain text with clear section breaks and proper spacing, maintaining a formal, doctor-like tone suitable for medical correspondence.
 
-        Format your response as a valid JSON object according to this schema:
-        {{
-        "date": "Current date if no date is mentioned in the format DD Month YYYY (e.g., '4 April 2025')",
-        "consultant": {{
-            "name": "Consultant's name if mentioned",
-            "specialty": "Consultant's specialty or department if mentioned",
-            "hospital": "Hospital or clinic name if mentioned",
-            "address": "Hospital address if mentioned"
-        }},
-        "patient": {{
-            "name": "Patient's full name if mentioned",
-            "dob": "Patient's date of birth if mentioned",
-            "condition": "The specific condition requiring referral",
-            "phone": "Patient's phone number if mentioned",
-            "email": "Patient's email address if mentioned"
-        }},
-        "clinical_details": {{
-            "presenting_complaint": "Concise description of presenting complaint WITH EXACT TIMELINE",
-            "duration": "Duration of symptoms WITH EXACT TIMEFRAME",
-            "relevant_findings": "Relevant physical or clinical findings",
-            "past_medical_history": "Past medical history with ALL CONDITIONS preserved",
-            "current_medications": "Current medications with EXACT DOSAGES preserved"
-        }},
-        "investigations": {{
-            "recent_tests": "Recent tests performed with DATES if mentioned",
-            "results": "Test results with EXACT VALUES preserved"
-        }},
-        "reason_for_referral": "Detailed reason for referral including any urgency indicators",
-        "referring_doctor": {{
-            "name": "Referring doctor's name if mentioned",
-            "title": "Referring doctor's professional title if mentioned",
-            "contact": "Referring doctor's contact information if mentioned",
-            "practice": "Referring doctor's practice name if mentioned"
-        }}
-    }}
-    IMPORTANT: 
-    - Your response MUST be a valid JSON object exactly matching this schema
-    - Only include information explicitly mentioned in the transcript
-    - If information for a field is not mentioned, provide an empty string
-    - Do not invent information not present in the conversation
-    - Be DIRECT and CONCISE in all documentation while preserving clinical accuracy
-    - Use professional medical terminology
+            Referral Letter Template:
+
+            [Practice Letterhead] 
+            
+            [Date]
+            
+            To:
+            Dr. [Consultant’s Name]
+            [Specialist Clinic/Hospital Name]
+            [Address Line 1]
+            [Address Line 2]
+            [City, Postcode]
+            
+            Dear Dr. [Consultant’s Last Name],
+            
+            Re: Referral for [Patient’s Name], [Date of Birth: DOB]
+           
+            I am referring [Patient’s Name] to your clinic for further evaluation and management of [specific condition or concern].
+            
+            Clinical Details:
+            Presenting Complaint: [e.g., Persistent abdominal pain, recurrent headaches]
+            Duration: [e.g., Symptoms have been present for 6 months]
+            Relevant Findings: [e.g., Significant weight loss, abnormal imaging findings]
+            Past Medical History: [e.g., Hypertension, diabetes]
+            Current Medications: [e.g., List of current medications]
+            
+            Investigations:
+            Recent Tests: [e.g., Blood tests, MRI, X-rays]
+            Results: [e.g., Elevated liver enzymes, abnormal MRI findings]
+            
+            Reason for Referral:
+            Due to [e.g., worsening symptoms, need for specialized evaluation], I would appreciate your expert assessment and management recommendations for this patient.
+            
+            Patient’s Contact Information:
+            Phone Number: [Patient’s Phone Number]
+            Email Address: [Patient’s Email Address]
+            
+            Enclosed are [e.g., relevant test results, imaging reports] for your review. Please do not hesitate to contact me if you require further information.
+            
+            Thank you for your attention to this referral. I look forward to your evaluation and recommendations.
+            Yours sincerely,
+            [Your Full Name]
+            [Your Title]
+            [Your Contact Information]
+            [Your Practice Name]
+
+            Detailed Instructions:
+            1. Data Source: Use only the information explicitly provided in the conversation transcript, contextual notes, or clinical note. Do not fabricate or infer any details, such as patient names, dates of birth, test results, or medical history, unless explicitly stated in the input.
+            2. Template Adherence: Strictly follow the provided template structure, including all sections (Clinical Details, Investigations, Reason for Referral, Patient’s Contact Information, etc.). Maintain the exact order and wording of section headers as shown in the template.
+            3. Omitting Missing Information: If any information required for a placeholder (e.g., Patient’s Name, DOB, Consultant’s Name, Address) or section (e.g., Investigations, Current Medications) is not explicitly mentioned, leave that placeholder or section blank. Do not include phrases like “not provided” or “unknown” in the output.
+            4. Date: Use the current date provided (e.g., 05/06/2025) for the letter’s date field. Ensure the format is DD/MM/YYYY.
+            5. Consultant and Clinic Details: If the consultant’s name, clinic name, or address is provided in the transcript or notes, include them in the “To” section. If not, address the letter generically as “Dear Specialist” and leave the clinic name and address fields blank.
+            6. Clinical Details Section: Include only explicitly mentioned details for Presenting Complaint, Duration, Relevant Findings, Past Medical History, and Current Medications. Group related findings logically (e.g., combine all symptoms under Presenting Complaint, all exam findings under Relevant Findings). Write in full sentences, avoiding bullet points.
+            7. Investigations Section: Include only tests and results explicitly mentioned in the input. If no tests or results are provided, leave the Investigations section blank.
+            8. Reason for Referral: Summarize the primary medical concern and the rationale for specialist referral based solely on the input data. For example, if the transcript mentions worsening symptoms or a need for specialized evaluation, reflect that in the reason. Keep this concise and focused.
+            9. Patient Contact Information: Include the patient’s phone number and email address only if explicitly provided in the input. If not, leave this section blank.
+            10. Enclosures: If the input mentions specific documents (e.g., test results, imaging reports), note them in the “Enclosed are” sentence. If no documents are mentioned, include the sentence “Enclosed are relevant medical records for your review” as a default.
+            11. Signature: Include the referring doctor’s full name, title, contact information, and practice name only if explicitly mentioned in the input. If not, leave these fields blank.
+            12. Tone and Style: Maintain a formal, professional, and concise tone consistent with medical correspondence. Avoid abbreviations, jargon, or informal language unless directly quoted from the input.
+            13. Formatting: Ensure the output is plain text with proper spacing (e.g., blank lines between sections and paragraphs) for readability. Use no bullet points, lists, or markdown formatting. Each section should be a paragraph or set of sentences as per the template.
+            14. Error Handling: If the input is incomplete or unclear, generate the letter with only the available data, leaving missing sections blank. Do not generate an error message or note deficiencies in the output.
+            15. Example Guidance: For reference, an example input transcript might describe a patient with “constant cough, shortness of breath, chest tightness, low-grade fever for 6 days,” with findings like “wheezing, crackles, temperature 37.6°C,” and a diagnosis of “acute bronchitis with asthma exacerbation.” The output should reflect only these details in the appropriate sections, as shown in the example referral letter.
+            16. If somedata is not available just write the place holder e.g; like this "Re: Referral for [Patient’s Name], [Date of Birth: DOB]" if data available write "Re: Referral for [Munaza Ashraf], [Date of Birth: 10/10/2002]"
+            17. If date for referral letter is mising just write that day's date
+            18. Only talk about enclosing document if talk about during conversation.
+            19. Dont fabricate data, and add anything that was not stated
+
+            Example for Reference (Do Not Use as Input):
+
+
+            Example 1:
+                    
+            Example Transcription:
+            Speaker 0 : Good morning i'm doctor sarah what brings you in today
+            Speaker 1 : Good morning i have been feeling really unwell for the past week i have a constant cough shortness of breath and my chest feels tight i also have a low grade fever that comes and goes
+            Speaker 0 : That sounds uncomfortable when did these symptoms start
+            Speaker 1 : About six days ago at first i thought it was just a cold but it's getting worse i get tired just walking a few steps
+            Speaker 0 : Are you producing any mucus with the cough
+            Speaker 1 : Yes it's yellowish green and like sometimes it's hard to breathe
+            Speaker 0 : Especially at night any wheezing or chest pain
+            Speaker 1 : A little wheezing and my chest feels heavy no sharp pain though do you have
+            Speaker 0 : A history of asthma copd or any lung condition?
+            Speaker 1 : I have a mild asthma i use an albuterol inhaler occasionally maybe once or twice a week
+            Speaker 0 : Any history of smoking i smoked in college but
+            Speaker 1 : I quit ten years ago
+            Speaker 0 : Do you have any allergic or chronic illness like diabetes hypertension or gerd
+            Speaker 1 : I have type two diabetes diagnosed three years ago i take metamorphin five hundred mg twice a day no known allergies
+            Speaker 0 : Any recent travel or contact with someone who's been sick
+            Speaker 1 : No travel but my son had a very bad cold last week
+            Speaker 0 : Alright let me check your vitals and listen to your lung your temperature is 106 respiratory rate is 22 oxygen saturation is 94 and heart rate is 92 beats per minute i hear some wheezing and crackles in both lower lung field your throat looks a bit red and post nasal drip is present
+            Speaker 1 : Is it a chest infection
+            Speaker 0 : Based on your symptoms history and exam it sounds like acute bronchitis possibly comp complicated by asthma and diabetes it's likely viral but with your underlying condition we should be cautious medications i'll prescribe amoxicillin chloride eight seventy five mg or one twenty five mg twice daily for seven days just in case there's a bacterial component continue using your albuterol inhaler but increase to every four to six six hours as needed i'm also prescribing a five day course of oral prednisone forty mg per day to reduce inflammation due to your asthma flare for the cough you can take guifenacin with dex with dextromethorphan as needed check your blood glucose more frequently while on prednisone as it can raise your sugar levels if your oxygen drops below 92 or your breathing worsens go to the emergency rest stay hydrated and avoid exertion use a humidifier at night and avoid cold air i want to see you back in three to five days to recheck your lungs and sugar control if symptoms worsen sooner come in immediately okay that makes sense will these make me sleepy the cough syrup might so take it at night and remember don't drive after taking it let me print your ex prescription and set your follow-up"
+
+            Example REFERRAL LETTER Output:
+
+            [Practice Letterhead]
+
+            05/06/2025
+
+            To:  
+            Dr. Sarah  
+            General Practice Clinic  
+            456 Health Avenue  
+            Karachi, 75000
+
+            Dear Dr. Sarah,
+
+
+            Re: Referral for Patient, DOB
+
+            I am referring this patient to your clinic for further evaluation and management of acute bronchitis with asthma exacerbation.
+
+            Clinical Details:
+            Presenting Complaint: Constant cough, shortness of breath, chest tightness, low-grade fever
+            Duration: Symptoms have been present for 6 days
+            Relevant Findings: Wheezing and crackles in both lower lung fields, red throat, post-nasal drip present, yellowish-green sputum, fatigue with minimal exertion
+            Past Medical History: Mild asthma, Type 2 diabetes diagnosed 3 years ago, Ex-smoker (quit 10 years ago), No known allergies
+            Current Medications: Albuterol inhaler 1-2 times weekly, Metformin 500mg twice daily
+
+            Investigations:
+            Recent Tests: Vital signs
+            Results: Temperature: 37.6°C, Respiratory rate: 22, Oxygen saturation: 94%, Heart rate: 92 bpm
+
+
+            Reason for Referral:
+            Due to worsening respiratory symptoms complicated by underlying asthma and diabetes, I would appreciate your expert assessment and management recommendations for this patient.
+
+
+            Patient's Contact Information: 
+
+
+            Thank you for your attention to this referral. I look forward to your evaluation and recommendations.
+
+
+            Yours sincerely,
+
+            [Your Full Name]
+            [Your Title]
+
+
+            Example 2:
+                    
+            Example Transcription:
+            Speaker 0: Seeing you again how are you?
+            Speaker 1: Hi i'm feeling okay normally i come every two months but scheduled earlier because i've been feeling depressed and anxious i had a panic attack this morning and felt like having chest pain tired and overwhelmed
+            Speaker 0: well i'm sorry to hear that can you describe the panic attack further.
+            Speaker 1: well i feel like i have a knot in my throat it's a very uncomfortable sensation i was taking lithium in the past but discontinued it because of the side effects
+            Speaker 0: what kind of side effects?
+            Speaker 1: i was dizzy slow thought process and was feeling nauseous i still throw up every morning i have this sensation like i need to throw up but since i don't have anything in my stomach i just retch
+            Speaker 0: how long has this been going on for.
+            Speaker 1: oh it's been going on for a month now.
+            Speaker 0: and how about the panic attacks
+            Speaker 1: I was having the panic attacks once every week in the past and had stopped for three months and this was the first time after that
+            Speaker 0: Are you stressed out about anything in particular
+            Speaker 1: I feel stressed out about my work and don't want to be there but have to be there for money i work in verizon in sales department sometimes when there are no customers that's when i feel the worst because if i can't hit the sales target they they can fire me
+            Speaker 0: How was your job before that?
+            Speaker 1: I was working at wells fargo before and that was even more stressful and before that i was working with uber which was not as stressful but the money wasn't good and before that i was working for at and t which was good but because of my illness i could not continue to work there
+            Speaker 0: and how has your mood been
+            Speaker 1: i feel down i feel like i have a lack of motivation i used to watch a lot of movies and tv shows in the past but now i don't feel interested anymore
+            Speaker 0: what do you do in your free time?
+            Speaker 1: oh i spend a lot of time on facebook just scrolling you know i have a friend in cuba and he chats with me every day which kinda distracts me
+            Speaker 0: who do you live with?
+            Speaker 1: i live with my husband and a child a four year old girl
+            Speaker 0: do you like spending time with them
+            Speaker 1: not really i don't feel like doing much my daughter is closer with my husband so she likes spending more time with him i do take her to the park though
+            Speaker 0: how's your sleep been
+            Speaker 1: i sleep well i sleep for more than ten hours
+            Speaker 0: is it normal for you to sleep for ten hours or do you feel like you have been sleeping more than usual
+            Speaker 1: no it's normal i usually sleep that long
+            Speaker 0: how's your appetite been
+            Speaker 1: i feel like my appetite has reduced
+            Speaker 0: and how about your concentration have you been able to focus on your work
+            Speaker 1: no my concentration is really bad
+            Speaker 0: for how long
+            Speaker 1: it's been like that for a month now
+            Speaker 0: do you get any dark thoughts like thoughts about hurting yourself or anybody else no how about experiencing anything unusual like hearing voices no one else can hear or seeing things no one else can see such as shadows etcetera
+            Speaker 1: no k
+            Speaker 0: in the last month have you had any episodes where you have be you have the opposite of low energy like having a lot of energy a lot of thoughts running in your head really fast
+            Speaker 1: no i know what manic episodes look like my husband has been keeping an eye on me and i i'm also aware of how how i feel when it starts
+            Speaker 0: okay that's good seems like the main issue right now is depression and anxiety have you been getting the monthly injections on time
+            Speaker 1: yes
+            speaker 0: that's good are you open to start oral medication to help with your symptoms in addition to the injection
+            speaker 1: yes
+            Speaker 0: okay we're going to start you on a medication for depression that you'll take every morning however you will have to watch out for hyperactivity because medication for depression can trigger a manic episode if you feel like you are getting excessively active and not sleeping well give us a call
+            Speaker 1: Okay doctor
+            Speaker 0: we will also start you on a medication for anxiety
+            Speaker 1: okay sounds good
+            Speaker 0: okay pleasure meeting you and see you in next follow-up visit
+            Speaker 1: okay thank you
+            Speaker 0: thanks bye
+
+            Example REFERRAL LETTER Output:
+
+            [Practice Letterhead]
+
+            05/06/2025
+
+            To:  
+            Dr. [Consultant's Name]  
+            [Specialist Clinic/Hospital Name]  
+            [Address Line 1]  
+            [Address Line 2]  
+            [City, Postcode]
+
+            Dear Dr. [Consultant's Last Name],
+
+
+            Re: Referral for [Patient's Name], [Date of Birth: DOB]
+
+            I am referring this patient to your clinic for further evaluation and management of depression with anxiety in the context of bipolar disorder.
+
+            Clinical Details:
+            Presenting Complaint: Depression, anxiety, and panic attacks
+            Duration: Symptoms have been present for at least one month
+            Relevant Findings: Morning retching/vomiting for the past month, sensation of knot in throat, chest pain during panic attacks, fatigue, feeling overwhelmed, low mood, lack of motivation, anhedonia, reduced appetite, poor concentration
+            Past Medical History: Bipolar disorder
+            Current Medications: Monthly injections for bipolar disorder (previously on lithium but discontinued due to side effects including dizziness, cognitive slowing, and nausea)
+
+            Investigations:
+            Recent Tests: Mental state examination
+            Results: Patient appears depressed and anxious
+
+
+            Reason for Referral:
+            Due to recurrence of panic attacks after a three-month symptom-free period and worsening depressive symptoms, I would appreciate your expert assessment and management recommendations for this patient.
+
+
+            Patient's Contact Information: 
+
+
+            Enclosed are relevant clinical notes for your review. Please do not hesitate to contact me if you require further information.
+
+            Thank you for your attention to this referral. I look forward to your evaluation and recommendations.
+
+
+            Yours sincerely,
+
+            [Your Full Name]
+            [Your Title]
+
+
+
+By following these instructions, ensure the referral letter is accurate, professional, and compliant with the template, using only the provided data.
     """
 
 
         elif template_type == "consult_note":
+
+            user_instructions= f"""You are provided with a medical conversation transcript. 
+            Analyze the transcript and generate a structured Consult note following the specified template. 
+            Use only the information explicitly provided in the transcript, and do not include or assume any additional details. 
+            Ensure the output is a valid JSON object with the Cosnult note sections (Consultation Type, History, Examination, Impression, and Plan) as keys, formatted professionally and concisely in a doctor-like tone. 
+            Make sure the output is in valid JSON format. 
+            If the patient didnt provide the information regarding (Consultation Type, History, Examination, Impression, and Plan) then ignore the respective section.
+            For time references (e.g., “this morning,” “last Wednesday”), convert to specific dates based on today’s date, current day's date whatever it is on calender.
+            Include the all numbers in numeric format.
+            Make sure the output is concise and to the point.
+            Ensure that each point of (Consultation Type, History, Examination, Impression, and Plan) starts with "- ".
+            ENsure the data in (Consultation Type, History, Examination, Impression, and Plan) should be concise to the point and professional.
+            Make it useful as doctors perspective so it makes there job easier, dont just dictate and make a note, analyze the conversation, summarize it and make a note that best desrcibes the patient's case as a doctor's perspective.
+            For each point add - at the beginning of the line and give two letter space after that.
+            Add time related information in the report dont miss them.
+            Make sure the point are concise and structured and looks professional.
+            Use medical terms to describe each thing
+            Dont repeat anyything dude please.
+            Include sub-headings as specified below in format in output
+            Below is the transcript:\n\n{conversation_text}
+            """
             # Add the new system prompt for consultation notes
-            system_message = f"""You are a medical documentation expert specializing in concise and professional consultation notes.
-{preservation_instructions}
-{grammar_instructions}
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured consult note in text format based solely on a provided medical conversation transcript or contextual notes. 
+            The note must follow the specified template with sections: Consultation Type, History, Examination, Impression, and Plan. 
+            Use only information explicitly provided in the transcript or notes, avoiding any assumptions or invented details. 
+            Ensure the output is concise, professional, and written in a doctor-like tone to facilitate clinical decision-making. 
+            Summarize the transcript effectively to capture the patient’s case from a doctor’s perspective.
 
-CRITICAL STYLE INSTRUCTIONS:
-1. Write as a doctor would write - using professional medical terminology and standard medical abbreviations
-2. Be CONCISE and DIRECT in your documentation (e.g., "2-week history of productive cough" NOT "The patient reported that they have been experiencing a cough with phlegm for the past two weeks")
-3. Use medical shorthand where appropriate (e.g., "BP 120/80" instead of "Blood pressure is 120/80")
-4. Document each issue separately with clear diagnosis and differential diagnosis
-5. Focus on capturing critical details using the fewest words necessary
-6. Format the note exactly according to the structure provided
-7. When information is not present in the transcript, indicate this with an appropriate note (e.g., "Not documented during consultation")
+            Instructions
 
-CRITICAL FORMATTING RULES FOR IMPRESSION SECTION:
-1. SEPARATE each medical issue or symptom into its OWN impression item
-2. DO NOT combine multiple symptoms into a single impression item
-3. Each impression item should focus on ONE specific issue (e.g., "Shortness of breath" or "Peripheral edema")
-4. For EACH separate issue, provide its likely diagnosis
-5. For multiple related symptoms that suggest a single diagnosis, create ONE impression item for each primary symptom
-6. Example format:
-   Issue 1: "Shortness of breath" - Diagnosis: "Heart failure"
-   Issue 2: "Peripheral edema" - Diagnosis: "Likely secondary to heart failure"
+            Output Structure
+            - Generate a text-based consult note with the following sections, formatted as specified:
+                a) Consultation Type: Specify "F2F" (face-to-face) or "T/C" (telephone consultation) and whether anyone else is present (e.g., "seen alone" or "seen with [person]") based on introductions in the transcript. Include the reason for visit (e.g., current issues, presenting complaint, booking note, or follow-up).
+                b) History: Include subheadings for History of Presenting Complaints, ICE (Ideas, Concerns, Expectations), Red Flag Symptoms, Relevant Risk Factors, PMH/PSH (Past Medical/Surgical History), DH (Drug History)/Allergies, FH (Family History), and SH (Social History).
+                c) Examination: Include subheadings for Vital Signs, Physical/Mental State Examination Findings, and Investigations with Results.
+                d) Impression: List each issue with its likely diagnosis and differential diagnosis (if mentioned).
+                e) Plan: Include investigations planned, treatment planned, referrals, follow-up plan, and safety netting advice for each issue (if mentioned).
+            - Use bullet points (`- `) for all items under History, Examination, and Plan sections.
+            - Populate fields only with data explicitly mentioned in the transcript or notes. Leave fields blank (omit the field or section) if no relevant data is provided.
+            - Use a concise, professional tone, e.g., "Fatigue and dull headache since May 29, 2025. Ibuprofen taken with minimal relief."
+            - If some sentence is long split it into multiple points and write "-  " before each line.
 
-When formatting the provided medical conversation, structure it according to this consultation note format:
-- Consultation Context: Whether F2F (face-to-face) or T/C (telephone consultation), who was present, and reason for visit
-- History: Patient's presenting complaints, ideas/concerns/expectations, red flag symptoms, risk factors, past medical history, medications, allergies, family history, and social history
-- Examination: Vital signs, physical examination findings, and any investigations with results
-- Impression: SEPARATE numbered issues with diagnosis and differential diagnosis
-- Plan: Investigations, treatment, referrals, follow-up plan, and safety netting advice
+            Consult Note Format: 
 
-Format your response as a valid JSON object according to this schema:
-{{
-  "consultation_context": {{
-    "consultation_type": "String indicating F2F or T/C",
-    "patient_status": "String indicating if seen alone or with someone",
-    "reason_for_visit": "String with reason for visit"
-  }},
-  "history": {{
-    "presenting_complaints": "String with history of presenting complaints WITH ALL DATES preserved",
-    "ideas_concerns_expectations": "String with patient's ideas, concerns, and expectations",
-    "red_flag_symptoms": "String indicating presence or absence of red flag symptoms",
-    "risk_factors": "String with relevant risk factors",
-    "past_medical_history": "String with past medical/surgical history",
-    "medications": "String with medications WITH EXACT dosages and frequency",
-    "allergies": "String with allergies",
-    "family_history": "String with relevant family history",
-    "social_history": "String with social history details"
-  }},
-  "examination": {{
-    "vital_signs": "String with vital signs WITH EXACT measurements",
-    "physical_findings": "String with physical examination findings",
-    "investigations": "String with investigations and results"
-  }},
-  "impression": [
-    {{
-      "issue": "ONE specific symptom or problem (DO NOT combine multiple symptoms)",
-      "diagnosis": "The most likely diagnosis for THIS SPECIFIC issue",
-      "differential_diagnosis": "Alternative diagnoses for THIS SPECIFIC issue"
-    }}
-  ],
-  "plan": {{
-    "investigations": "String with planned investigations",
-    "treatment": "String with treatment plan WITH EXACT medication details",
-    "referrals": "String with referrals",
-    "follow_up": "String with follow-up plan WITH timeframe",
-    "safety_netting": "String with safety netting advice"
-  }},
-  "consultation_date": "If no date is mentioned in the conversation, use the current date in the format DD Month YYYY (e.g., '4 April 2025')",
-  "patient_name": "String with patient name if mentioned"
-}}
+            Consultation Type:
+            - Specify "F2F" or "T/C" based on the consultation method mentioned in the transcript.
+            - Note presence of others (e.g., "seen alone" or "seen with [person]") based on introductions.
+            - State the reason for visit (e.g., presenting complaint, booking note, follow-up) as mentioned.
 
-IMPORTANT: 
-- Your response MUST be a valid JSON object exactly matching this schema
-- Use "Not documented" for any field without information in the conversation
-- Do not invent information not present in the conversation
-- Be DIRECT and CONCISE in all documentation while preserving clinical accuracy
-- Always preserve ALL dates, medication dosages, and measurements EXACTLY as stated
-- Create complete documentation that would meet professional medical standards
-- If no consultation date is mentioned in the conversation, generate the current date in the format DD Month YYYY (e.g., '4 April 2025')
-- REMEMBER: Create SEPARATE impression items for EACH distinct symptom or issue
+            History:
+            - Include the following subheadings, using bullet points (`- `) for each item:
+                a) History of Presenting Complaints: Summarize the patient’s chief complaints, including duration, timing, location, quality, severity, or context, if mentioned.
+                b) ICE: Patient’s Ideas, Concerns, and Expectations, if mentioned.
+                c) Red Flag Symptoms: Presence or absence of red flag symptoms relevant to the presenting complaint, if mentioned.
+                d) Relevant Risk Factors: Risk factors relevant to the complaint, if mentioned.
+                e) PMH/PSH: Past medical or surgical history, if mentioned.
+                f) DH/Allergies: Drug history/medications and allergies, if mentioned (omit allergies if not mentioned).
+                g) FH: Relevant family history, if mentioned.
+                h) SH: Social history (e.g., lives with, occupation, smoking/alcohol/drugs, recent travel, carers/package of care), if mentioned.
+            - Omit any subheading or field if no relevant information is provided.
+
+            Examination:
+            - Include the following subheadings, using bullet points (`- `) for each item:
+                a) Vital Signs: List vital signs (e.g., temperature, oxygen saturation, heart rate, blood pressure, respiratory rate), if mentioned.
+                b) Physical/Mental State Examination Findings: System-specific examination findings, if mentioned. Use multiple bullet points as needed.
+                c) Investigations with Results: Completed investigations and their results, if mentioned.
+            - Omit any subheading or field if no relevant information is provided.
+            - Do not assume normal findings unless explicitly stated.
+
+            Impression:
+            - List each issue, problem, or request as a separate entry, formatted as:
+            - "[Issue name]. [Likely diagnosis (condition name only, if mentioned)]"
+            - Use a bullet point (`- `) for differential diagnosis, if mentioned (e.g., "- Differential diagnosis: [list]").
+            - Include multiple issues (e.g., Issue 1, Issue 2, etc.) if mentioned, matching the chief complaints.
+            - Omit any issue or field if not mentioned.
+
+            Plan:
+            - Use bullet points (`- `) for each item, including:
+                a) Investigations Planned: Planned or ordered investigations for each issue, if mentioned.
+                b) Treatment Planned: Planned treatments for each issue, if mentioned.
+                c) Relevant Referrals: Referrals for each issue, if mentioned.
+                d) Follow-up Plan: Follow-up timeframe, if mentioned.
+                e) Advice: Advice given (e.g., symptoms requiring GP callback, 111 call for non-life-threatening issues, or A&E/999 for emergencies), if mentioned.
+            - Group plans by issue (e.g., Issue 1, Issue 2) for clarity, if multiple issues are present.
+            - Omit any field or section if no relevant information is provided.
+            - If some sentence is long split it into multiple points and write "-  " before each line.
+            - Always include sub-headings if data available for them
+ 
+            
+            Constraints
+            - Data Source: Use only data from the provided transcript or contextual notes. Do not invent patient details, assessments, diagnoses, differential diagnoses, plans, interventions, evaluations, or safety netting advice.
+            - Tone and Style**: Maintain a professional, concise tone suitable for medical documentation. Avoid verbose or redundant phrasing.
+            - Time References**: Convert all time-related information (e.g., "yesterday", "2 days ago") to specific dates based on June 5, 2025 (Thursday). Examples:
+            - This morning → Today's Date
+            - "Yesterday" → Yesterday's date
+            - "A week ago" → Date exactly a week ago
+            - Use numeric format for numbers (e.g., "2" not "two").
+            - Analysis: Analyze and summarize the transcript to reflect the patient’s case from a doctor’s perspective, ensuring the note is useful for clinical decision-making.
+            - Empty Input: If no transcript or notes are provided, return an empty consult note structure with only the required section headings.
+            - Formatting: Use bullet points (`- `) for History, Examination, and Plan sections. Ensure impression section follows the specified format without bullet points for the issue/diagnosis line. Do not state that information was not mentioned; simply omit the relevant field or section.
+
+            Output
+            - Generate a text-based consult note adhering to the specified structure, populated only with data explicitly provided in the transcript or notes. Ensure the note is concise, structured, and professional.
+
+
+            IMPORTANT: 
+            - Your response MUST be a valid JSON object 
+            - Do not invent information not present in the conversation
+            - Be DIRECT and CONCISE in all documentation while preserving clinical accuracy
+            - Always preserve ALL dates, medication dosages, and measurements EXACTLY as stated
+            - Create complete documentation that would meet professional medical standards
+            - If no consultation date is mentioned in the conversation, generate the current date in the format DD Month YYYY 
+            - REMEMBER: Create SEPARATE impression items for EACH distinct symptom or issue
+
+
+            Example for Reference (Do Not Use as Input):
+
+
+            Example 1:
+                    
+            Example Transcription:
+            Speaker 0 : Good morning i'm doctor sarah what brings you in today
+            Speaker 1 : Good morning i have been feeling really unwell for the past week i have a constant cough shortness of breath and my chest feels tight i also have a low grade fever that comes and goes
+            Speaker 0 : That sounds uncomfortable when did these symptoms start
+            Speaker 1 : About six days ago at first i thought it was just a cold but it's getting worse i get tired just walking a few steps
+            Speaker 0 : Are you producing any mucus with the cough
+            Speaker 1 : Yes it's yellowish green and like sometimes it's hard to breathe
+            Speaker 0 : Especially at night any wheezing or chest pain
+            Speaker 1 : A little wheezing and my chest feels heavy no sharp pain though do you have
+            Speaker 0 : A history of asthma copd or any lung condition?
+            Speaker 1 : I have a mild asthma i use an albuterol inhaler occasionally maybe once or twice a week
+            Speaker 0 : Any history of smoking i smoked in college but
+            Speaker 1 : I quit ten years ago
+            Speaker 0 : Do you have any allergic or chronic illness like diabetes hypertension or gerd
+            Speaker 1 : I have type two diabetes diagnosed three years ago i take metamorphin five hundred mg twice a day no known allergies
+            Speaker 0 : Any recent travel or contact with someone who's been sick
+            Speaker 1 : No travel but my son had a very bad cold last week
+            Speaker 0 : Alright let me check your vitals and listen to your lung your temperature is 106 respiratory rate is 22 oxygen saturation is 94 and heart rate is 92 beats per minute i hear some wheezing and crackles in both lower lung field your throat looks a bit red and post nasal drip is present
+            Speaker 1 : Is it a chest infection
+            Speaker 0 : Based on your symptoms history and exam it sounds like acute bronchitis possibly comp complicated by asthma and diabetes it's likely viral but with your underlying condition we should be cautious medications i'll prescribe amoxicillin chloride eight seventy five mg or one twenty five mg twice daily for seven days just in case there's a bacterial component continue using your albuterol inhaler but increase to every four to six six hours as needed i'm also prescribing a five day course of oral prednisone forty mg per day to reduce inflammation due to your asthma flare for the cough you can take guifenacin with dex with dextromethorphan as needed check your blood glucose more frequently while on prednisone as it can raise your sugar levels if your oxygen drops below 92 or your breathing worsens go to the emergency rest stay hydrated and avoid exertion use a humidifier at night and avoid cold air i want to see you back in three to five days to recheck your lungs and sugar control if symptoms worsen sooner come in immediately okay that makes sense will these make me sleepy the cough syrup might so take it at night and remember don't drive after taking it let me print your ex prescription and set your follow-up"
+
+            Example CONSULT Note Output:
+
+            F2F seen alone. Constant cough, shortness of breath, chest tightness, low-grade fever for past 6 days.
+
+            History:
+            - Constant cough with yellowish-green sputum, SOB, chest tightness, low-grade fever for 6 days
+            - Symptoms worsening, fatigue with minimal exertion
+            - Wheezing, chest heaviness, no sharp pain
+            - Symptoms worse at night
+            - Initially thought it was just a cold
+            - Son had bad cold last week
+            - PMH: Mild asthma, uses albuterol inhaler 1-2 times weekly, Type 2 diabetes diagnosed 3 years ago
+            - DH: Metformin 500mg BD, albuterol inhaler PRN. Allergies: None known
+            - SH: Ex-smoker, quit 10 years ago
+
+            Examination:
+            - T 37.6°C, Sats 94%, HR 92 bpm, RR 22
+            - Wheezing and crackles in both lower lung fields
+            - Red throat, post-nasal drip present
+
+            Impression:
+            1. Acute bronchitis with asthma exacerbation. Acute bronchitis complicated by asthma and diabetes
+            2. Type 2 Diabetes
+
+            Plan:
+            - Investigations: Follow-up in 3-5 days to reassess lungs and glucose control
+            - Treatment: Amoxicillin clavulanate 875/125mg BD for 7 days, increase albuterol inhaler to every 4-6 hours PRN, prednisone 40mg daily for 5 days, guaifenesin with dextromethorphan for cough PRN
+            - Monitor blood glucose more frequently while on prednisone
+            - Continue metformin 500mg BD
+            - Rest, stay hydrated, avoid exertion
+            - Use humidifier at night, avoid cold air
+            - Seek emergency care if oxygen drops below 92% or breathing worsens
+            - Counselled regarding sedative effects of cough medication
+
+
+            Example 2:
+                    
+            Example Transcription:
+            Speaker 0: Seeing you again how are you?
+            Speaker 1: Hi i'm feeling okay normally i come every two months but scheduled earlier because i've been feeling depressed and anxious i had a panic attack this morning and felt like having chest pain tired and overwhelmed
+            Speaker 0: well i'm sorry to hear that can you describe the panic attack further.
+            Speaker 1: well i feel like i have a knot in my throat it's a very uncomfortable sensation i was taking lithium in the past but discontinued it because of the side effects
+            Speaker 0: what kind of side effects?
+            Speaker 1: i was dizzy slow thought process and was feeling nauseous i still throw up every morning i have this sensation like i need to throw up but since i don't have anything in my stomach i just retch
+            Speaker 0: how long has this been going on for.
+            Speaker 1: oh it's been going on for a month now.
+            Speaker 0: and how about the panic attacks
+            Speaker 1: I was having the panic attacks once every week in the past and had stopped for three months and this was the first time after that
+            Speaker 0: Are you stressed out about anything in particular
+            Speaker 1: I feel stressed out about my work and don't want to be there but have to be there for money i work in verizon in sales department sometimes when there are no customers that's when i feel the worst because if i can't hit the sales target they they can fire me
+            Speaker 0: How was your job before that?
+            Speaker 1: I was working at wells fargo before and that was even more stressful and before that i was working with uber which was not as stressful but the money wasn't good and before that i was working for at and t which was good but because of my illness i could not continue to work there
+            Speaker 0: and how has your mood been
+            Speaker 1: i feel down i feel like i have a lack of motivation i used to watch a lot of movies and tv shows in the past but now i don't feel interested anymore
+            Speaker 0: what do you do in your free time?
+            Speaker 1: oh i spend a lot of time on facebook just scrolling you know i have a friend in cuba and he chats with me every day which kinda distracts me
+            Speaker 0: who do you live with?
+            Speaker 1: i live with my husband and a child a four year old girl
+            Speaker 0: do you like spending time with them
+            Speaker 1: not really i don't feel like doing much my daughter is closer with my husband so she likes spending more time with him i do take her to the park though
+            Speaker 0: how's your sleep been
+            Speaker 1: i sleep well i sleep for more than ten hours
+            Speaker 0: is it normal for you to sleep for ten hours or do you feel like you have been sleeping more than usual
+            Speaker 1: no it's normal i usually sleep that long
+            Speaker 0: how's your appetite been
+            Speaker 1: i feel like my appetite has reduced
+            Speaker 0: and how about your concentration have you been able to focus on your work
+            Speaker 1: no my concentration is really bad
+            Speaker 0: for how long
+            Speaker 1: it's been like that for a month now
+            Speaker 0: do you get any dark thoughts like thoughts about hurting yourself or anybody else no how about experiencing anything unusual like hearing voices no one else can hear or seeing things no one else can see such as shadows etcetera
+            Speaker 1: no k
+            Speaker 0: in the last month have you had any episodes where you have be you have the opposite of low energy like having a lot of energy a lot of thoughts running in your head really fast
+            Speaker 1: no i know what manic episodes look like my husband has been keeping an eye on me and i i'm also aware of how how i feel when it starts
+            Speaker 0: okay that's good seems like the main issue right now is depression and anxiety have you been getting the monthly injections on time
+            Speaker 1: yes
+            speaker 0: that's good are you open to start oral medication to help with your symptoms in addition to the injection
+            speaker 1: yes
+            Speaker 0: okay we're going to start you on a medication for depression that you'll take every morning however you will have to watch out for hyperactivity because medication for depression can trigger a manic episode if you feel like you are getting excessively active and not sleeping well give us a call
+            Speaker 1: Okay doctor
+            Speaker 0: we will also start you on a medication for anxiety
+            Speaker 1: okay sounds good
+            Speaker 0: okay pleasure meeting you and see you in next follow-up visit
+            Speaker 1: okay thank you
+            Speaker 0: thanks bye
+
+            Example CONSULT Note Output:
+
+            F2F seen alone. Feeling depressed and anxious.
+
+            History:
+            - Scheduled appointment earlier than usual due to feeling depressed and anxious
+            - Panic attack this morning with chest pain, fatigue, feeling overwhelmed
+            - Sensation of knot in throat
+            - Morning retching/vomiting for past month
+            - Panic attacks occurring weekly previously, stopped for three months, recent recurrence
+            - Work-related stress (currently in sales at Verizon)
+            - Previous employment at Wells Fargo (more stressful), Uber (less stressful but poor pay), AT&T (had to leave due to illness)
+            - Low mood, lack of motivation, anhedonia (no longer interested in previously enjoyed activities like movies/TV)
+            - Spends free time scrolling through Facebook, chatting with friend in Cuba
+            - Lives with husband and 4-year-old daughter
+            - Reduced interest in family activities, though takes daughter to park
+            - Sleep: 10+ hours (normal pattern)
+            - Reduced appetite
+            - Poor concentration for past month
+            - No suicidal/homicidal ideation
+            - No hallucinations
+            - No recent manic episodes
+            - History of bipolar disorder (aware of manic episode symptoms, husband monitoring)
+            - Previously on lithium but discontinued due to side effects (dizziness, cognitive slowing, nausea)
+            - Currently receiving monthly injections
+
+            Examination:
+            - Mental state: Appears depressed and anxious
+
+            Impression:
+            1. Depression with anxiety
+            2. Bipolar disorder (currently in depressive phase)
+
+            Plan:
+            - Continue monthly injections
+            - Start antidepressant medication (morning dose)
+            - Start anti-anxiety medication
+            - Safety netting: Monitor for signs of mania (hyperactivity, reduced sleep), contact if these develop
+            - Follow up appointment scheduled
+
 """
         # Similar detailed instructions would be added for other template types
         
@@ -2973,7 +3385,7 @@ Format your response as a valid JSON object according to the clinical report sch
             Address all chief complaints and issues separately in the S and A/P sections. 
             Make sure the output is in valid JSON format. 
             If the patient didnt provide the information regarding (S, PMedHx, SocHx, FHx, O, A/P) then ignore the respective section.
-            For time references (e.g., “this morning,” “last Wednesday”), convert to specific dates based on today’s date, June 1, 2025 (Sunday). For example, “this morning” is June 1, 2025; “last Wednesday” is May 28, 2025; “a week ago” is May 25, 2025
+            For time references (e.g., “this morning,” “last Wednesday”), convert to specific dates based on today’s date, current day's date whatever it is on calender.
             Include the all numbers in numeric format.
             Make sure the output is concise and to the point.
             Ensure that each point of S, PMedHx, SocHx, FHx, O starts with "- ", but for A/P it should not, just point them nicely and concisely.
@@ -2983,6 +3395,7 @@ Format your response as a valid JSON object according to the clinical report sch
             For each point add - at the beginning of the line and give two letter space after that.
             Add time related information in the report dont miss them.
             Make sure the point are concise and structured and looks professional.
+            Dont repeat content in S, PMedHx, and O.
             Below is the transcript:\n\n{conversation_text}"""
             
             
@@ -3016,6 +3429,7 @@ Format your response as a valid JSON object according to the clinical report sch
             If the patient is not taking any medications, do not include medication details, but include other relevant medical history if provided.
             If the patient is taking medications, list the medications, dosage, and frequency.
             Keep each point concise and to the point and in new line with "- " at the beginning of the line.
+            Dont miss any past related inforamtion that is related to the case.
 
             SocHx:
             List social history relevant to the complaints.
@@ -3036,17 +3450,20 @@ Format your response as a valid JSON object according to the clinical report sch
             For psychiatry-related appointments, if explicitly mentioned, include: “Appears well, appropriately dressed for occasion. Normal speech. Reactive affect. No perceptual abnormalities. Normal thought form and content. Intact insight and judgement. Cognition grossly normal.”
             Do not include this section if no objective findings or exam results are provided in the transcription.
             Keep each point concise and to the point and in new line with "- " at the beginning of the line.
+            Dont miss any objective related inforamtion that is related to the case.
+
 
             A/P:
             For each issue or group of related complaints (list as 1, 2, 3, etc.):
             - State the issue or group of symptoms (e.g., “Fatigue and headache”).
-            - Provide the likely diagnosis (condition name only) with Diagnosis Heading.
+            - Provide the likely diagnosis (condition name only) with Diagnosis Heading only if the issue and diagnosis is contextually not the same, it will help in removal of duplication.
             - List differential diagnoses.
             - List planned investigations and if no investigations are planned then write nothing ignore the points related to investigations.
             - List planned treatments if discussed in the conversation otherwise write nothing and ignore the points related to treatments.
             - List relevant referrals and follow ups with timelines if mentioned otherwise write nothing and ignore the points related to referrals and follow ups.
             - If the have multiple treatments then list them in new line.
             Ensure A/P aligns with S, grouping related complaints unless explicitly separate.
+        
 
             Instructions:
             Output a valid JSON object with keys: S, PMedHx, SocHx, FHx, O, A/P.
@@ -3055,6 +3472,7 @@ Format your response as a valid JSON object according to the clinical report sch
             Group related complaints (e.g., fatigue and headache due to stress) unless the transcription indicates distinct etiologies.
             In O, report only provided vitals and exam findings; do not assume normal findings unless explicitly stated.
             Ensure professional, doctor-like tone without verbose or redundant phrasing.
+            Dont repeat any thing in S, O and PMedHx, SocHx, FHx, i mean if something is taken care in objective (fulfills the purpose) then dont add in subjective and others.
                         
             Example for Reference (Do Not Use as Input):
 
@@ -3252,12 +3670,277 @@ Format your response as a valid JSON object according to the clinical report sch
             Follow-up if abnormal results
 
             """
+       
+        elif template_type == "soap_issues":
+
+            user_instructions= f"""You are provided with a medical conversation transcript. 
+            Analyze the transcript and generate a structured SOAP ISSUES NOTE following the specified template. 
+            Use only the information explicitly provided in the transcript, and do not include or assume any additional details. 
+            Ensure the output is a valid JSON object with the SOAP ISSUES NOTE sections (Subjective, objective, assessment and plan) as keys, formatted professionally and concisely in a doctor-like tone. 
+            Address all chief complaints and issues separately in the S and A/P sections. 
+            Make sure the output is in valid JSON format. 
+            If the patient didnt provide the information regarding (Subjective, objective, assessment and plan) then ignore the respective section.
+            For time references (e.g., “this morning,” “last Wednesday”), convert to specific dates based on today’s date, current day's date whatever it is on calender.
+            Include the all numbers in numeric format.
+            Make sure the output is concise and to the point.
+            Ensure that each point of (Subjective, objective, assessment and plan) starts with "- ", but for A/P it should not, just point them nicely and concisely.
+            Subjective, Assessment and Plan should always have sub headings and should be concise.
+            ENsure the data in (Subjective, objective, assessment and plan) should be concise to the point and professional.
+            Make it useful as doctors perspective so it makes there job easier, dont just dictate and make a note, analyze the conversation, summarize it and make a note that best desrcibes the patient's case as a doctor's perspective.
+            For each point add - at the beginning of the line and give two letter space after that.
+            Add time related information in the report dont miss them.
+            Make sure the point are concise and structured and looks professional.
+            Use medical terms to describe each thing
+            Below is the transcript:\n\n{conversation_text}
+
+            """
+            system_message = f"""You are a medical documentation assistant tasked with generating a clinical report in JSON format based solely on provided transcript, contextual notes, or clinical notes. The output must be a valid JSON object with the keys: "subjective", "past_medical_history", "objective", and "assessment_and_plan". 
+            {preservation_instructions} {grammar_instructions}
+            Adhere to the following structured instructions:
+
+            1. JSON Structure
+            Output a JSON object with the following structure:
+                        
+            "subjective": 
+                "issues"
+                "past_medical_history"
+            "objective"
+            "assessment_and_plan"
+            
+        - Populate fields only with data explicitly mentioned in the provided transcript, contextual notes, or clinical notes. Leave fields blank (empty strings or arrays) if no relevant data is provided.
+        - Use a concise, professional, doctor-like tone, e.g., "Fatigue and dull headache for two weeks. Ibuprofen taken few days ago with minimal relief."
+        - Avoid redundant or verbose phrasing.
+
+        SOAP Note Template:
+
+        Subjective:
+        1.1 Issues Array
+        - Create an array of objects under "subjective.issues", one for each distinct issue, problem, or request mentioned in the source.
+        - For each issue, include:
+            a) issue_name: The condition, request, or topic name only (e.g., "Headache", "Fatigue").
+            b) reasons_for_visit: Chief complaints (e.g., symptoms, requests) if mentioned.
+            c) duration_timing_location_quality_severity_context: Details on duration, timing, location, quality, severity, or context if mentioned.
+            d) worsens_alleviates: Factors that worsen or alleviate symptoms, including self-treatment attempts and their effectiveness, if mentioned.
+            e) progression: How symptoms have changed or evolved over time, if mentioned.
+            f) previous_episodes: Past occurrences of similar symptoms, including when they occurred, management, and outcomes, if mentioned.
+            g) impact_on_daily_activities: Effect on daily life, work, or activities, if mentioned.
+            h) associated_symptoms: Focal or systemic symptoms accompanying the chief complaint, if mentioned.
+            i) medications: List if any medicines the person is taking for that specific issue, the dosage and related information if mentioned.
+        - Leave any field blank (empty string) if not explicitly mentioned in the source.
+        - make it concise to the point
+        - avoid repetition
+        - If some sentence is long split it into multiple points and write "-  " before each line.
+        - Group related complaints (e.g., fatigue and headache due to stress) under a single issue unless the source indicates distinct etiologies.
+
+        1.2 Past Medical History
+        - Include under "subjective.past_medical_history":
+            a) contributing_factors: Past medical/surgical history, investigations, or treatments relevant to the reasons for visit or chief complaints, if mentioned.
+            b) social_history: Relevant social history (e.g., smoking, alcohol use), if mentioned.
+            c) family_history: Relevant family medical history, if mentioned.
+            d) exposure_history: Relevant exposure history (e.g., environmental, occupational), if mentioned.
+            e) immunization_history: Immunization status, if mentioned.
+            f) other: Any other relevant subjective information, if mentioned.
+        - Leave fields blank (empty strings) if not mentioned in the source.
+
+        Objective:
+        - Include under "objective":
+            a) vital_signs: Vital signs (e.g., BP, HR) if explicitly mentioned.
+            b) examination_findings: Physical or mental state examination findings, including system-specific exams, if mentioned.
+            c) investigations_with_results: Completed investigations and their results, if mentioned.
+        - Leave fields blank (empty strings) if not mentioned.
+        - Do not assume normal findings or include planned investigations (these belong in "assessment_and_plan").
+        - make it concise to the point
+        - avoid repetition
+        - If some sentence is long split it into multiple points and write "-  " before each line.
+
+        Assessment and Plan:
+        - Create an array of objects under "assessment_and_plan", one for each issue listed in "subjective.issues".
+        - For each issue, include:
+            a) issue_name: Must match the corresponding "issue_name" in "subjective.issues".
+            b) likely_diagnosis: Condition name only, if mentioned.
+            c) differential_diagnosis: Possible alternative diagnoses, if mentioned.
+            d) investigations_planned: Planned or ordered investigations, if mentioned.
+            e) treatment_planned: Planned treatments, if mentioned.
+            f) referrals: Relevant referrals, if mentioned.
+        - Leave fields blank (empty strings) if not mentioned.
+
+        Constraints
+        - Data Source: Use only data from the provided transcript, contextual notes, or clinical notes. Do not invent patient details, assessments, plans, interventions, evaluations, or continuing care plans.
+        - Tone and Style: Maintain a professional, concise tone suitable for medical documentation.
+        - No Assumptions: Do not infer or assume information (e.g., normal vitals, unmentioned symptoms, or diagnoses) unless explicitly stated.
+        - Empty Input: If no transcript or notes are provided, return the JSON structure with all fields as empty strings or arrays, ready to be populated.
+
+        Output: Generate a valid JSON object adhering to the above structure and constraints, populated only with data explicitly provided in the input.
+        
+        
+        Example for Reference (Do Not Use as Input):
+
+
+            Example 1:
+                    
+            Example Transcription:
+            Speaker 0 : Good morning i'm doctor sarah what brings you in today
+            Speaker 1 : Good morning i have been feeling really unwell for the past week i have a constant cough shortness of breath and my chest feels tight i also have a low grade fever that comes and goes
+            Speaker 0 : That sounds uncomfortable when did these symptoms start
+            Speaker 1 : About six days ago at first i thought it was just a cold but it's getting worse i get tired just walking a few steps
+            Speaker 0 : Are you producing any mucus with the cough
+            Speaker 1 : Yes it's yellowish green and like sometimes it's hard to breathe
+            Speaker 0 : Especially at night any wheezing or chest pain
+            Speaker 1 : A little wheezing and my chest feels heavy no sharp pain though do you have
+            Speaker 0 : A history of asthma copd or any lung condition?
+            Speaker 1 : I have a mild asthma i use an albuterol inhaler occasionally maybe once or twice a week
+            Speaker 0 : Any history of smoking i smoked in college but
+            Speaker 1 : I quit ten years ago
+            Speaker 0 : Do you have any allergic or chronic illness like diabetes hypertension or gerd
+            Speaker 1 : I have type two diabetes diagnosed three years ago i take metamorphin five hundred mg twice a day no known allergies
+            Speaker 0 : Any recent travel or contact with someone who's been sick
+            Speaker 1 : No travel but my son had a very bad cold last week
+            Speaker 0 : Alright let me check your vitals and listen to your lung your temperature is 106 respiratory rate is 22 oxygen saturation is 94 and heart rate is 92 beats per minute i hear some wheezing and crackles in both lower lung field your throat looks a bit red and post nasal drip is present
+            Speaker 1 : Is it a chest infection
+            Speaker 0 : Based on your symptoms history and exam it sounds like acute bronchitis possibly comp complicated by asthma and diabetes it's likely viral but with your underlying condition we should be cautious medications i'll prescribe amoxicillin chloride eight seventy five mg or one twenty five mg twice daily for seven days just in case there's a bacterial component continue using your albuterol inhaler but increase to every four to six six hours as needed i'm also prescribing a five day course of oral prednisone forty mg per day to reduce inflammation due to your asthma flare for the cough you can take guifenacin with dex with dextromethorphan as needed check your blood glucose more frequently while on prednisone as it can raise your sugar levels if your oxygen drops below 92 or your breathing worsens go to the emergency rest stay hydrated and avoid exertion use a humidifier at night and avoid cold air i want to see you back in three to five days to recheck your lungs and sugar control if symptoms worsen sooner come in immediately okay that makes sense will these make me sleepy the cough syrup might so take it at night and remember don't drive after taking it let me print your ex prescription and set your follow-up"
+
+            Example SOAP ISSUES Note Output:
+
+            Subjective:
+            Acute bronchitis with asthma exacerbation
+            - Constant cough, shortness of breath, chest tightness, low-grade fever
+            - 6 days duration, worsening symptoms, fatigue with minimal exertion
+            - Yellowish-green sputum production
+            - Symptoms worse at night
+            - Previous episodes: Mild asthma, uses albuterol inhaler 1-2 times weekly
+            - Impact on daily activities: Tired after walking few steps
+            - Associated symptoms: Wheezing, chest heaviness
+
+            Type 2 Diabetes
+            - Diagnosed 3 years ago
+            - On metformin 500mg twice daily
+
+            Past Medical History:
+            - Mild asthma, uses albuterol inhaler 1-2 times weekly
+            - Type 2 diabetes diagnosed 3 years ago
+            - Ex-smoker, quit 10 years ago
+            - No known allergies
+            - Son had bad cold last week
+
+            Objective:
+            - Temperature: 37.6°C, Respiratory rate: 22, Oxygen saturation: 94%, Heart rate: 92 bpm
+            - Wheezing and crackles in both lower lung fields, red throat, post-nasal drip present
+
+            Assessment & Plan:
+            Acute bronchitis with asthma exacerbation
+            - Acute bronchitis complicated by asthma and diabetes
+            - Investigations: Follow-up in 3-5 days to reassess lungs and glucose control
+            - Treatment: Amoxicillin clavulanate 875/125mg twice daily for 7 days, increase albuterol inhaler to every 4-6 hours as needed, prednisone 40mg daily for 5 days, guaifenesin with dextromethorphan for cough as needed
+            - Monitor blood glucose more frequently while on prednisone
+            - Seek emergency care if oxygen drops below 92% or breathing worsens
+            - Rest, hydration, avoid exertion, use humidifier at night, avoid cold air
+            - Counselled regarding sedative effects of cough medication
+
+            Type 2 Diabetes
+            - Continue metformin 500mg twice daily
+            - Monitor blood glucose more frequently while on prednisone
+        
+
+            Example 2:
+                    
+            Example Transcription:
+            Speaker 0: Seeing you again how are you?
+            Speaker 1: Hi i'm feeling okay normally i come every two months but scheduled earlier because i've been feeling depressed and anxious i had a panic attack this morning and felt like having chest pain tired and overwhelmed
+            Speaker 0: well i'm sorry to hear that can you describe the panic attack further.
+            Speaker 1: well i feel like i have a knot in my throat it's a very uncomfortable sensation i was taking lithium in the past but discontinued it because of the side effects
+            Speaker 0: what kind of side effects?
+            Speaker 1: i was dizzy slow thought process and was feeling nauseous i still throw up every morning i have this sensation like i need to throw up but since i don't have anything in my stomach i just retch
+            Speaker 0: how long has this been going on for.
+            Speaker 1: oh it's been going on for a month now.
+            Speaker 0: and how about the panic attacks
+            Speaker 1: I was having the panic attacks once every week in the past and had stopped for three months and this was the first time after that
+            Speaker 0: Are you stressed out about anything in particular
+            Speaker 1: I feel stressed out about my work and don't want to be there but have to be there for money i work in verizon in sales department sometimes when there are no customers that's when i feel the worst because if i can't hit the sales target they they can fire me
+            Speaker 0: How was your job before that?
+            Speaker 1: I was working at wells fargo before and that was even more stressful and before that i was working with uber which was not as stressful but the money wasn't good and before that i was working for at and t which was good but because of my illness i could not continue to work there
+            Speaker 0: and how has your mood been
+            Speaker 1: i feel down i feel like i have a lack of motivation i used to watch a lot of movies and tv shows in the past but now i don't feel interested anymore
+            Speaker 0: what do you do in your free time?
+            Speaker 1: oh i spend a lot of time on facebook just scrolling you know i have a friend in cuba and he chats with me every day which kinda distracts me
+            Speaker 0: who do you live with?
+            Speaker 1: i live with my husband and a child a four year old girl
+            Speaker 0: do you like spending time with them
+            Speaker 1: not really i don't feel like doing much my daughter is closer with my husband so she likes spending more time with him i do take her to the park though
+            Speaker 0: how's your sleep been
+            Speaker 1: i sleep well i sleep for more than ten hours
+            Speaker 0: is it normal for you to sleep for ten hours or do you feel like you have been sleeping more than usual
+            Speaker 1: no it's normal i usually sleep that long
+            Speaker 0: how's your appetite been
+            Speaker 1: i feel like my appetite has reduced
+            Speaker 0: and how about your concentration have you been able to focus on your work
+            Speaker 1: no my concentration is really bad
+            Speaker 0: for how long
+            Speaker 1: it's been like that for a month now
+            Speaker 0: do you get any dark thoughts like thoughts about hurting yourself or anybody else no how about experiencing anything unusual like hearing voices no one else can hear or seeing things no one else can see such as shadows etcetera
+            Speaker 1: no k
+            Speaker 0: in the last month have you had any episodes where you have be you have the opposite of low energy like having a lot of energy a lot of thoughts running in your head really fast
+            Speaker 1: no i know what manic episodes look like my husband has been keeping an eye on me and i i'm also aware of how how i feel when it starts
+            Speaker 0: okay that's good seems like the main issue right now is depression and anxiety have you been getting the monthly injections on time
+            Speaker 1: yes
+            speaker 0: that's good are you open to start oral medication to help with your symptoms in addition to the injection
+            speaker 1: yes
+            Speaker 0: okay we're going to start you on a medication for depression that you'll take every morning however you will have to watch out for hyperactivity because medication for depression can trigger a manic episode if you feel like you are getting excessively active and not sleeping well give us a call
+            Speaker 1: Okay doctor
+            Speaker 0: we will also start you on a medication for anxiety
+            Speaker 1: okay sounds good
+            Speaker 0: okay pleasure meeting you and see you in next follow-up visit
+            Speaker 1: okay thank you
+            Speaker 0: thanks bye
+           
+            Example SOAP ISSUES Note Output:
+
+            Subjective:
+            Depression and Anxiety
+            - Reports feeling depressed and anxious
+            - Experienced panic attack this morning with chest pain, fatigue, feeling overwhelmed
+            - Describes sensation of knot in throat
+            - Panic attacks occurring once weekly previously, stopped for three months, recent recurrence
+            - Morning retching/vomiting for past month
+            - Work-related stress (sales position at Verizon) with concerns about meeting targets
+            - Previous employment history includes Wells Fargo (more stressful), Uber (less stressful but poor pay), AT&T (had to leave due to illness)
+            - Mood: feels down, lacks motivation
+            - Loss of interest in previously enjoyed activities (movies, TV shows)
+            - Spends free time scrolling through Facebook
+            - Reduced interest in family interactions
+            - Sleep: 10 hours nightly (normal pattern)
+            - Reduced appetite
+            - Poor concentration for past month
+            - Denies suicidal/homicidal ideation
+            - Denies hallucinations
+            - No recent manic episodes
+            - Aware of manic symptoms, husband monitoring
+
+            Past Medical History:
+            - History of bipolar disorder (currently receiving monthly injections)
+            - Previously prescribed lithium but discontinued due to side effects (dizziness, slowed thought process, nausea)
+
+            Objective:
+            - Currently receiving monthly injections for bipolar disorder
+
+            Assessment & Plan:
+            Depression and Anxiety
+            - Assessment: Depression with anxiety symptoms
+            - Treatment planned: 
+            - Continue monthly injections
+            - Starting new oral medication for depression (morning dose)
+            - Starting medication for anxiety
+            - Counselled regarding risk of medication triggering manic episodes and to report symptoms of hyperactivity or reduced sleep
+            - Follow-up appointment scheduled
+        
+        """
+
+       
         # Make the API request to GPT - Remove the response_format parameter which is causing the error
         response = client.chat.completions.create(
             model="gpt-4.1",
             messages=[
                 {"role": "system", "content": system_message},
-                {"role": "user", "content": user_instructions if template_type == "new_soap_note" or template_type == "detailed_soap_note" else f"Here is a medical conversation. Please format it into a structured {template_type}. YOUR RESPONSE MUST BE VALID JSON:\n\n{conversation_text}"}
+                {"role": "user", "content": user_instructions if template_type == "new_soap_note" or template_type == "detailed_soap_note" or template_type == "soap_issues" or template_type == "consult_note" or template_type == "referral_letter" else f"Here is a medical conversation. Please format it into a structured {template_type}. YOUR RESPONSE MUST BE VALID JSON:\n\n{conversation_text}"}
             ],
             temperature=0.3, # Lower temperature for more consistent outputs
             response_format={"type": "json_object"}
@@ -3311,6 +3994,8 @@ async def format_report(gpt_response, template_type):
             return await format_soap_note(data)
         elif template_type == "new_soap_note":
             return await format_new_soap(data)
+        elif template_type == "soap_issues":
+            return await format_soap_issues(data)
         elif template_type == "progress_note":
             return await format_progress_note(data)
         elif template_type == "mental_health_appointment":
@@ -3613,10 +4298,11 @@ async def save_audio_to_s3(audio_data, filename=None):
         return None
 
 # Save transcript data to DynamoDB
-async def save_transcript_to_dynamodb(transcript_data, audio_info=None, status="completed"):
+async def save_transcript_to_dynamodb(transcript_data, audio_info=None, status="completed", transcript_id=None):
     try:
         operation_id = str(uuid.uuid4())[:8]
-        transcript_id = str(uuid.uuid4())
+        if not transcript_id:
+            transcript_id = str(uuid.uuid4())
         timestamp = datetime.now().isoformat()
         
         db_logger.info(f"[OP-{operation_id}] Saving transcript to DynamoDB, ID: {transcript_id}, status: {status}")
@@ -4337,7 +5023,7 @@ async def format_new_soap(gpt_response):
         note = []
         
         # Add heading
-        note.append("# SOAP NOTE\n")
+        note.append("# SOAP ISSUES\n")
         
         # SUBJECTIVE
         if gpt_response.get("S"):
@@ -4385,6 +5071,99 @@ async def format_new_soap(gpt_response):
             ap_lines = format_ap_section(gpt_response["A/P"])
             note.extend(ap_lines)
             note.append("")  # Blank line after section
+        
+        return "\n".join(note)
+    except Exception as e:
+        error_logger.error(f"Error formatting new SOAP note: {str(e)}", exc_info=True)
+        return f"Error formatting new SOAP note: {str(e)}"
+
+
+async def format_soap_issues(gpt_response):
+    """
+    Format a new SOAP note from GPT structured response.
+    
+    Args:
+        gpt_response: Dictionary containing the structured SOAP note data
+        
+    Returns:
+        Formatted string containing the human-readable SOAP note
+    """
+    try:
+        note = []
+        
+        # Add heading
+        note.append("# SOAP ISSUES\n")
+        
+        # SUBJECTIVE
+        if gpt_response.get("subjective", {}).get("issues"):
+            note.append("## SUBJECTIVE")
+            for issue in gpt_response["subjective"]["issues"]:
+                note.append(f"### {issue['issue_name']}")
+                if issue.get("reasons_for_visit"):
+                    note.append(issue["reasons_for_visit"])
+                if issue.get("duration_timing_location_quality_severity_context"):
+                    note.append(issue["duration_timing_location_quality_severity_context"])
+                if issue.get("worsens_alleviates"):
+                    note.append(issue["worsens_alleviates"])
+                if issue.get("progression"):
+                    note.append(issue["progression"])
+                if issue.get("previous_episodes"):
+                    note.append(issue["previous_episodes"])
+                if issue.get("impact_on_daily_activities"):
+                    note.append(issue["impact_on_daily_activities"])
+                if issue.get("associated_symptoms"):
+                    note.append(issue["associated_symptoms"])
+                if issue.get("medications"):
+                    note.append(issue["medications"])
+
+                note.append("")
+        
+        # PAST MEDICAL HISTORY
+        if gpt_response.get("subjective", {}).get("past_medical_history"):
+            note.append("## PAST MEDICAL HISTORY")
+            pmh = gpt_response["subjective"]["past_medical_history"]
+            if pmh.get("contributing_factors"):
+                note.append(pmh["contributing_factors"])
+            if pmh.get("social_history"):
+                note.append(pmh["social_history"])
+            if pmh.get("family_history"):
+                note.append(pmh["family_history"])
+            if pmh.get("exposure_history"):
+                note.append(pmh["exposure_history"])
+            if pmh.get("immunization_history"):
+                note.append(pmh["immunization_history"])
+            if pmh.get("other"):
+                note.append(pmh["other"])
+            note.append("")
+        
+        # OBJECTIVE
+        if gpt_response.get("objective"):
+            note.append("## OBJECTIVE")
+            obj = gpt_response["objective"]
+            if obj.get("vital_signs"):
+                note.append(obj["vital_signs"])
+            if obj.get("examination_findings"):
+                note.append(obj["examination_findings"])
+            if obj.get("investigations_with_results"):
+                note.append(obj["investigations_with_results"])
+            note.append("")
+        
+        # ASSESSMENT & PLAN
+        if gpt_response.get("assessment_and_plan"):
+            note.append("## ASSESSMENT & PLAN")
+            for item in gpt_response["assessment_and_plan"]:
+                note.append(f"### {item['issue_name']}")
+                if item.get("likely_diagnosis"):
+                    note.append(f"Likely Diagnosis: {item['likely_diagnosis']}")
+                if item.get("differential_diagnosis"):
+                    note.append(f"Differential Diagnosis: {item['differential_diagnosis']}")
+                if item.get("investigations_planned"):
+                    note.append(f"Investigations Planned: {item['investigations_planned']}")
+                if item.get("treatment_planned"):
+                    note.append(f"Treatment Planned: {item['treatment_planned']}")
+                if item.get("referrals"):
+                    note.append(f"Referrals: {item['referrals']}")
+                note.append("")
         
         return "\n".join(note)
     except Exception as e:
@@ -5852,7 +6631,7 @@ async def format_dietician_assessment(gpt_response):
 
 async def format_consult_note(gpt_response):
     """
-    Format a consultation note from GPT structured response based on CONSULT_NOTE_SCHEMA.
+    Format a consultation note from GPT structured response based on the specified consult note template.
     
     Args:
         gpt_response: Dictionary containing the structured consultation note data
@@ -5866,131 +6645,64 @@ async def format_consult_note(gpt_response):
         # Add heading
         report.append("# CONSULTATION NOTE\n")
         
-        # Add patient name and date if available
-        if gpt_response.get("patient_name") and gpt_response["patient_name"] != "Not documented":
-            report.append(f"Patient: {gpt_response['patient_name']}")
+        # Consultation Type
+        consultation_type = gpt_response.get("Consultation Type", [])
+        if consultation_type and consultation_type != "Not documented" and consultation_type != []:
+            report.append("## Consultation Type:")
+            report.extend([f"- {item.lstrip('- ')}" for item in consultation_type])
+            report.append("")
         
-        if gpt_response.get("consultation_date") and gpt_response["consultation_date"] != "Not documented":
-            report.append(f"Date: {gpt_response['consultation_date']}")
-            
-        report.append("")
+        # History Section
+        history = gpt_response.get("History", {})
+        if history:
+            report.append("## History:")
+            history_fields = [
+                ("History of Presenting Complaints", lambda x: [f"- {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- {x.lstrip('- ')}"]),
+                ("ICE", lambda x: [f"- ICE: {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- ICE: {x.lstrip('- ')}"]),
+                ("Red Flag Symptoms", lambda x: [f"- {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- {x.lstrip('- ')}"]),
+                ("Relevant Risk Factors", lambda x: [f"- Relevant risk factors: {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- Relevant risk factors: {x.lstrip('- ')}"]),
+                ("PMH/PSH", lambda x: [f"- PMH: {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- PMH: {x.lstrip('- ')}"]),
+                ("DH/Allergies", lambda x: [f"- DH: {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- DH: {x.lstrip('- ')}"]),
+                ("FH", lambda x: [f"- FH: {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- FH: {x.lstrip('- ')}"]),
+                ("SH", lambda x: [f"- SH: {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- SH: {x.lstrip('- ')}"])
+            ]
+            for field, formatter in history_fields:
+                if field in history and history[field] and history[field] != "Not documented" and history[field] != "":
+                    report.extend(formatter(history[field]))
+            report.append("")
         
-        # Add consultation context with labels
-        context = gpt_response.get("consultation_context", {})
-        context_lines = []
+        # Examination Section
+        examination = gpt_response.get("Examination", {})
+        if examination:
+            report.append("## Examination:")
+            exam_fields = [
+                ("Vital Signs", lambda x: [f"- {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- {x.lstrip('- ')}"]),
+                ("Physical/Mental State Examination Findings", lambda x: [f"- {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- {x.lstrip('- ')}"]),
+                ("Investigations with Results", lambda x: [f"- {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- {x.lstrip('- ')}"])
+            ]
+            for field, formatter in exam_fields:
+                if field in examination and examination[field] and examination[field] != "Not documented" and examination[field] != "":
+                    report.extend(formatter(examination[field]))
+            report.append("")
         
-        if context.get("consultation_type") and context["consultation_type"] != "Not documented":
-            context_lines.append(f"Consultation Type: {context['consultation_type']}")
-            
-        if context.get("patient_status") and context["patient_status"] != "Not documented":
-            context_lines.append(f"Patient Status: {context['patient_status']}")
-            
-        if context.get("reason_for_visit") and context["reason_for_visit"] != "Not documented":
-            context_lines.append(f"Reason for Visit: {context['reason_for_visit']}")
-            
-        if context_lines:
-            report.extend(context_lines)
-        else:
-            report.append("Consultation details not documented.")
-            
-        report.append("")
+        # Impression Section
+        impression = gpt_response.get("Impression", [])
+        if impression and impression != "Not documented" and impression != []:
+            report.append("## Impression:")
+            for i, item in enumerate(impression, 1):
+                if isinstance(item, str) and item != "Not documented" and item != "":
+                    report.append(f"{i}. {item}")
+            report.append("")
         
-        # History section with hashtag for bold
-        report.append("## History:")
-        history = gpt_response.get("history", {})
-        history_documented = False
-        
-        history_fields = [
-            ("presenting_complaints", "- "),
-            ("ideas_concerns_expectations", "- ICE: "),
-            ("red_flag_symptoms", "- "),
-            ("risk_factors", "- Relevant risk factors: "),
-            ("past_medical_history", "- PMH: "),
-            ("medications", "- DH: "),
-            ("allergies", "- Allergies: "),
-            ("family_history", "- FH: "),
-            ("social_history", "- SH: ")
-        ]
-        
-        for field, prefix in history_fields:
-            if field in history and history[field] and history[field] != "Not discussed":
-                report.append(f"{prefix}{history[field]}")
-                history_documented = True
-                
-        if not history_documented:
-            report.append("No history documented during this consultation.")
-            
-        report.append("")
-        
-        # Examination section with hashtag for bold
-        report.append("## Examination:")
-        examination = gpt_response.get("examination", {})
-        examination_documented = False
-        
-        exam_fields = [
-            ("vital_signs", "- "),
-            ("physical_findings", "- "),
-            ("investigations", "- ")
-        ]
-        
-        for field, prefix in exam_fields:
-            if field in examination and examination[field] and examination[field] != "Not documented":
-                report.append(f"{prefix}{examination[field]}")
-                examination_documented = True
-                
-        if not examination_documented:
-            report.append("No examination documented during this consultation.")
-            
-        report.append("")
-        
-        # Impression section with hashtag for bold
-        report.append("## Impression:")
-        impression_items = gpt_response.get("impression", [])
-        
-        if impression_items and any(item.get("issue") and item["issue"] != "Not documented" for item in impression_items):
-            for i, item in enumerate(impression_items, 1):
-                if item.get("issue") and item["issue"] != "Not documented":
-                    issue_text = item["issue"].strip()
-                    
-                    # Format the issue line
-                    issue_line = f"{i}. {issue_text}"
-                    
-                    # Add diagnosis if available
-                    if item.get("diagnosis") and item["diagnosis"] != "Not documented":
-                        diagnosis_text = item["diagnosis"].strip()
-                        issue_line += f". Likely diagnosis: {diagnosis_text}"
-                        
-                    report.append(issue_line)
-                    
-                    # Only include differential diagnosis if it exists and is not "Not documented"
-                    if item.get("differential_diagnosis") and item["differential_diagnosis"] != "Not documented":
-                        diff_diagnosis_text = item["differential_diagnosis"].strip()
-                        report.append(f"- Differential diagnosis: {diff_diagnosis_text}")
-        else:
-            report.append("No clinical impression documented during this consultation.")
-            
-        report.append("")
-        
-        # Plan section with hashtag for bold
-        report.append("## Plan:")
-        plan = gpt_response.get("plan", {})
-        plan_documented = False
-        
-        plan_fields = [
-            ("investigations", "- Investigations planned: "),
-            ("treatment", "- Treatment planned: "),
-            ("referrals", "- Relevant referrals: "),
-            ("follow_up", "- Follow up plan: "),
-            ("safety_netting", "- Safety netting advice given: ")
-        ]
-        
-        for field, prefix in plan_fields:
-            if field in plan and plan[field] and plan[field] != "Not documented":
-                report.append(f"{prefix}{plan[field]}")
-                plan_documented = True
-                
-        if not plan_documented:
-            report.append("No plan documented during this consultation.")
+        # Plan Section
+        plan = gpt_response.get("Plan", {})
+        if plan:
+            report.append("## Plan:")
+            for issue, actions in plan.items():
+                report.append(f"### {issue}:")
+                for action in actions:
+                    report.append(f"- {action.lstrip('- ')}")
+            report.append("")
         
         return "\n".join(report)
     except Exception as e:
@@ -5999,7 +6711,7 @@ async def format_consult_note(gpt_response):
 
 async def format_referral_letter(gpt_response):
     """
-    Format a referral letter from GPT structured response based on REFERRAL_LETTER_SCHEMA.
+    Format a referral letter from GPT structured response based on the specified referral letter template.
     
     Args:
         gpt_response: Dictionary containing the structured referral letter data
@@ -6008,192 +6720,135 @@ async def format_referral_letter(gpt_response):
         Formatted string containing the human-readable referral letter
     """
     try:
-        letter = []
-        
+        report = []
+
         # Add heading
-        letter.append("# REFERRAL LETTER\n")
+        report.append("# REFERRAL LETTER\n")
+        
+        # Practice Letterhead
+        letterhead = gpt_response.get("Practice Letterhead", "")
+        if letterhead:
+            report.append(letterhead)
         
         # Date
-        if gpt_response.get("date"):
-            letter.append(f"[{gpt_response['date']}]")
-        else:
-            # Use current date if not provided
-            current_date = datetime.now().strftime("%d %B %Y")
-            letter.append(f"[{current_date}]")
+        date = gpt_response.get("Date", "")
+        if date:
+            report.append(date)
+        report.append("")
         
-        letter.append("")
-        
-        # Recipient information
-        letter.append("## To:")
-        consultant = gpt_response.get("consultant", {})
-        
-        if consultant.get("name"):
-            letter.append(f"{consultant['name']}")
-        else:
-            letter.append("[Consultant's Name]")
-            
-        if consultant.get("specialty") and consultant.get("hospital"):
-            letter.append(f"{consultant['specialty']}, {consultant['hospital']}")
-        elif consultant.get("hospital"):
-            letter.append(f"{consultant['hospital']}")
-        else:
-            letter.append("[Specialist Clinic/Hospital Name]")
-            
-        # If address is available, split and format it
-        if consultant.get("address"):
-            address_parts = consultant["address"].split(",")
-            for part in address_parts:
-                letter.append(part.strip())
-        else:
-            letter.append("[Address Line]")
-        
-        letter.append("")
+        # To Section
+        consultant_name = gpt_response.get("Consultant’s Name", "")
+        clinic_name = gpt_response.get("Specialist Clinic/Hospital Name", "")
+        address_line_1 = gpt_response.get("Address Line 1", "")
+        address_line_2 = gpt_response.get("Address Line 2", "")
+        city_postcode = gpt_response.get("City, Postcode", "")
+        if consultant_name or clinic_name or address_line_1 or address_line_2 or city_postcode:
+            report.append("To:")
+            if consultant_name:
+                report.append(consultant_name)
+            if clinic_name:
+                report.append(clinic_name)
+            if address_line_1:
+                report.append(address_line_1)
+            if address_line_2:
+                report.append(address_line_2)
+            if city_postcode:
+                report.append(city_postcode)
+            report.append("")
         
         # Salutation
-        if consultant.get("name"):
-            # Extract last name if possible
-            name_parts = consultant["name"].split()
-            if len(name_parts) > 1 and name_parts[0].lower().startswith("dr"):
-                letter.append(f"Dear {name_parts[-1]},")
-            else:
-                letter.append(f"Dear {consultant['name']},")
-        else:
-            letter.append("Dear Dr. [Consultant's Last Name],")
+        salutation = gpt_response.get("Salutation", "Dear Specialist,").lstrip("- ").strip()
+        report.append(f"{salutation}")
+        report.append("")
         
-        letter.append("")
-        
-        # Patient information
-        patient = gpt_response.get("patient", {})
-        if patient.get("name") and patient.get("dob"):
-            letter.append(f"Re: Referral for {patient['name']}, Date of Birth: {patient['dob']}")
-        elif patient.get("name"):
-            letter.append(f"Re: Referral for {patient['name']}")
-        else:
-            letter.append("Re: Referral for [Patient's Name], [Date of Birth: DOB]")
-        
-        letter.append("")
+        # Re Line
+        re_line = gpt_response.get("Re", "").lstrip("- ").strip()
+        if re_line:
+            report.append(f"Re: {re_line}")
+            report.append("")
         
         # Introduction
-        if patient.get("name") and patient.get("condition"):
-            letter.append(f"I am referring {patient['name']} to your clinic for further evaluation and management of {patient['condition']}.")
-        elif patient.get("condition"):
-            letter.append(f"I am referring this patient to your clinic for further evaluation and management of {patient['condition']}.")
-        elif patient.get("name"):
-            letter.append(f"I am referring {patient['name']} to your clinic for further evaluation and management.")
-        else:
-            letter.append("I am referring this patient to your clinic for further evaluation and management.")
+        introduction = gpt_response.get("Introduction", "").lstrip("- ").strip()
+        if introduction:
+            report.append(introduction)
+            report.append("")
         
-        letter.append("")
+        # Clinical Details Section
+        clinical_details = gpt_response.get("Clinical Details", {})
+        clinical_details_text = []
+        for field in ["Presenting Complaint", "Duration", "Relevant Findings", "Past Medical History", "Current Medications"]:
+            if field in clinical_details and clinical_details[field]:
+                value = clinical_details[field]
+                if isinstance(value, list):
+                    clinical_details_text.append(" ".join(item.lstrip("- ").strip() for item in value if item))
+                else:
+                    clinical_details_text.append(value.lstrip("- ").strip())
+        if clinical_details_text:
+            report.append("Clinical Details:")
+            report.extend(clinical_details_text)
+            report.append("")
         
-        # Clinical Details
-        letter.append("## Clinical Details:")
-        clinical_details = gpt_response.get("clinical_details", {})
-        clinical_details_documented = False
-        
-        if clinical_details.get("presenting_complaint"):
-            letter.append(f"Presenting Complaint: {clinical_details['presenting_complaint']}")
-            clinical_details_documented = True
-            
-        if clinical_details.get("duration"):
-            letter.append(f"Duration: {clinical_details['duration']}")
-            clinical_details_documented = True
-            
-        if clinical_details.get("relevant_findings"):
-            letter.append(f"Relevant Findings: {clinical_details['relevant_findings']}")
-            clinical_details_documented = True
-            
-        if clinical_details.get("past_medical_history"):
-            letter.append(f"Past Medical History: {clinical_details['past_medical_history']}")
-            clinical_details_documented = True
-            
-        if clinical_details.get("current_medications"):
-            letter.append(f"Current Medications: {clinical_details['current_medications']}")
-            clinical_details_documented = True
-        
-        if not clinical_details_documented:
-            letter.append("No clinical details were documented during the consultation.")
-        
-        letter.append("")
-        
-        # Investigations
-        letter.append("## Investigations:")
-        investigations = gpt_response.get("investigations", {})
-        investigations_documented = False
-        
-        if investigations.get("recent_tests"):
-            letter.append(f"Recent Tests: {investigations['recent_tests']}")
-            investigations_documented = True
-            
-        if investigations.get("results"):
-            letter.append(f"Results: {investigations['results']}")
-            investigations_documented = True
-        
-        if not investigations_documented:
-            letter.append("No investigations were documented during the consultation.")
-        
-        letter.append("")
+        # Investigations Section
+        investigations = gpt_response.get("Investigations", {})
+        investigations_text = []
+        for field in ["Recent Tests", "Results"]:
+            if field in investigations and investigations[field]:
+                value = investigations[field]
+                if isinstance(value, list):
+                    investigations_text.append(" ".join(item.lstrip("- ").strip() for item in value if item))
+                else:
+                    investigations_text.append(value.lstrip("- ").strip())
+        if investigations_text:
+            report.append("Investigations:")
+            report.extend(investigations_text)
+            report.append("")
         
         # Reason for Referral
-        letter.append("## Reason for Referral:")
-        if gpt_response.get("reason_for_referral"):
-            letter.append(f"{gpt_response['reason_for_referral']}")
-        else:
-            letter.append("No specific reason for referral was documented during the consultation.")
+        reason = gpt_response.get("Reason for Referral", "").lstrip("- ").strip()
+        if reason:
+            report.append("Reason for Referral:")
+            report.append(reason)
+            report.append("")
         
-        letter.append("")
+        # Patient’s Contact Information
+        contact_info = gpt_response.get("Patient’s Contact Information", "")
+        if contact_info:
+            report.append("Patient’s Contact Information:")
+            report.append(contact_info)
+            report.append("")
         
-        # Patient Contact Information
-        letter.append("## Patient's Contact Information:")
-        patient_contact_documented = False
-        
-        if patient.get("phone"):
-            letter.append(f"Phone Number: {patient['phone']}")
-            patient_contact_documented = True
-            
-        if patient.get("email"):
-            letter.append(f"Email Address: {patient['email']}")
-            patient_contact_documented = True
-        
-        if not patient_contact_documented:
-            letter.append("No patient contact information was documented during the consultation.")
-        
-        letter.append("")
+        # Enclosures
+        enclosures = gpt_response.get("Enclosures", "").lstrip("- ").strip()
+        if enclosures:
+            report.append(enclosures)
+            report.append("")
         
         # Closing
-        letter.append("Enclosed are relevant test results and reports for your review. Please do not hesitate to contact me if you require further information.")
-        letter.append("")
-        letter.append("Thank you for your attention to this referral. I look forward to your evaluation and recommendations.")
-        letter.append("")
-        letter.append("Yours sincerely,")
-        letter.append("")
+        closing = gpt_response.get("Closing", "").lstrip("- ").strip()
+        if closing:
+            report.append(closing)
+            report.append("")
         
-        # Referring Doctor
-        doctor = gpt_response.get("referring_doctor", {})
-        if doctor.get("name"):
-            letter.append(f"{doctor['name']}")
-        else:
-            letter.append("[Your Full Name]")
-            
-        if doctor.get("title"):
-            letter.append(f"{doctor['title']}")
-        else:
-            letter.append("[Your Title]")
-            
-        if doctor.get("contact"):
-            letter.append(f"{doctor['contact']}")
-        else:
-            letter.append("[Your Contact Information]")
-            
-        if doctor.get("practice"):
-            letter.append(f"{doctor['practice']}")
-        else:
-            letter.append("[Your Practice Name]")
+        # Signature Section
+        signature = gpt_response.get("Signature", "")
+        title = gpt_response.get("Your Title", "")
+        contact = gpt_response.get("Your Contact Information", "")
+        practice_name = gpt_response.get("Your Practice Name", "")
+        report.append("Yours sincerely,")
+        report.append("")
+        if signature:
+            report.append(signature)
+        if title:
+            report.append(title)
+        if contact:
+            report.append(contact)
+        if practice_name:
+            report.append(practice_name)
         
-        return "\n".join(letter)
+        return "\n".join(report)
     except Exception as e:
         error_logger.error(f"Error formatting referral letter: {str(e)}", exc_info=True)
         return f"Error formatting referral letter: {str(e)}"
-
 
 # Add or update the format_psychology_session_notes function
 async def format_psychology_session_notes(gpt_response):
@@ -7102,7 +7757,7 @@ async def transcribe_and_generate_report(
                 }, status_code=400)
 
         # Validate template type
-        valid_templates = ["clinical_report","new_soap_note", "detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes","pathology_note", "consult_note","discharge_summary","case_formulation"]
+        valid_templates = ["clinical_report","new_soap_note","soap_issues", "detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes","pathology_note", "consult_note","discharge_summary","case_formulation"]
         
         if template_type not in valid_templates:
             error_msg = f"Invalid template type '{template_type}'. Must be one of: {', '.join(valid_templates)}"
@@ -7253,3 +7908,103 @@ async def transcribe_and_generate_report(
             "transcription_status": "failed",
             "report_status": "not_started"
         }, status_code=500)
+
+    """
+    Background task to process transcription and generate report.
+    """
+    try:
+        # Transcribe audio
+        transcription_result = await transcribe_audio_with_diarization(audio_data)
+        
+        # Update transcription in DynamoDB
+        await save_transcript_to_dynamodb(
+            transcription_result,
+            None,
+            status="completed",
+            transcript_id=transcript_id
+        )
+
+        # Generate GPT response
+        main_logger.info(f"Generating {template_type} template for transcript {transcript_id}")
+        gpt_response = await generate_gpt_response(transcription_result, template_type)
+        
+        if isinstance(gpt_response, str) and gpt_response.startswith("Error"):
+            await save_transcript_to_dynamodb(
+                {"error": gpt_response},
+                None,
+                status="failed",
+                transcript_id=transcript_id
+            )
+            return
+        
+        # Format the report
+        formatted_report = await format_report(gpt_response, template_type)
+        
+        if isinstance(formatted_report, str) and formatted_report.startswith("Error"):
+            await save_transcript_to_dynamodb(
+                {"error": formatted_report},
+                None,
+                status="failed",
+                transcript_id=transcript_id
+            )
+            return
+        
+        # Save report to database
+        report_id = await save_report_to_dynamodb(
+            transcript_id,
+            gpt_response,
+            formatted_report,
+            template_type,
+            status="completed"
+        )
+        
+        main_logger.info(f"Background processing completed for transcript {transcript_id}")
+        
+    except Exception as e:
+        error_msg = f"Error in background processing: {str(e)}"
+        error_logger.exception(error_msg)
+        await save_transcript_to_dynamodb(
+            {"error": error_msg},
+            None,
+            status="failed",
+            transcript_id=transcript_id
+        )
+
+@app.put("/update-report/{report_id}")
+@log_execution_time
+async def update_report(report_id: str, formatted_report: str = Form(...)):
+    try:
+        report_table = dynamodb.Table('reports')
+        response = report_table.get_item(Key={"id": report_id})
+        
+        if 'Item' not in response:
+            return JSONResponse({"error": f"Report ID {report_id} not found"}, status_code=404)
+            
+        update_expression = "SET formatted_report = :r, updated_at = :t"
+        expression_values = {
+            ":r": formatted_report,
+            ":t": datetime.utcnow().isoformat()
+        }
+        
+        report_table.update_item(
+            Key={"id": report_id},
+            UpdateExpression=update_expression,
+            ExpressionAttributeValues=expression_values,
+            ReturnValues="ALL_NEW"
+        )
+        
+        updated_response = report_table.get_item(Key={"id": report_id})
+        updated_report = updated_response['Item']
+        
+        return JSONResponse({
+            "status": "success",
+            "report_id": report_id,
+            "template_type": updated_report.get('template_type'),
+            "formatted_report": formatted_report,
+            "updated_at": updated_report.get('updated_at')
+        })
+        
+    except Exception as e:
+        error_msg = f"Failed to update report: {str(e)}"
+        error_logger.error(error_msg, exc_info=True)
+        return JSONResponse({"error": error_msg}, status_code=500)
