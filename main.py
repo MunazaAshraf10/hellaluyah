@@ -6776,13 +6776,18 @@ async def format_referral_letter(gpt_response):
         # Clinical Details Section
         clinical_details = gpt_response.get("Clinical Details", {})
         clinical_details_text = []
-        for field in ["Presenting Complaint", "Duration", "Relevant Findings", "Past Medical History", "Current Medications"]:
-            if field in clinical_details and clinical_details[field]:
-                value = clinical_details[field]
-                if isinstance(value, list):
-                    clinical_details_text.append(" ".join(item.lstrip("- ").strip() for item in value if item))
-                else:
-                    clinical_details_text.append(value.lstrip("- ").strip())
+        if isinstance(clinical_details, str):
+            # If clinical_details is a string, append it directly
+            clinical_details_text.append(clinical_details.lstrip("- ").strip())
+        elif isinstance(clinical_details, dict):
+            # If clinical_details is a dictionary, process fields as before
+            for field in ["Presenting Complaint", "Duration", "Relevant Findings", "Past Medical History", "Current Medications"]:
+                if field in clinical_details and clinical_details[field]:
+                    value = clinical_details[field]
+                    if isinstance(value, list):
+                        clinical_details_text.append(" ".join(item.lstrip("- ").strip() for item in value if item))
+                    else:
+                        clinical_details_text.append(value.lstrip("- ").strip())
         if clinical_details_text:
             report.append("Clinical Details:")
             report.extend(clinical_details_text)
@@ -6791,13 +6796,18 @@ async def format_referral_letter(gpt_response):
         # Investigations Section
         investigations = gpt_response.get("Investigations", {})
         investigations_text = []
-        for field in ["Recent Tests", "Results"]:
-            if field in investigations and investigations[field]:
-                value = investigations[field]
-                if isinstance(value, list):
-                    investigations_text.append(" ".join(item.lstrip("- ").strip() for item in value if item))
-                else:
-                    investigations_text.append(value.lstrip("- ").strip())
+        if isinstance(investigations, str):
+            # If investigations is a string, append it directly
+            investigations_text.append(investigations.lstrip("- ").strip())
+        elif isinstance(investigations, dict):
+            # If investigations is a dictionary, process fields as before
+            for field in ["Recent Tests", "Results"]:
+                if field in investigations and investigations[field]:
+                    value = investigations[field]
+                    if isinstance(value, list):
+                        investigations_text.append(" ".join(item.lstrip("- ").strip() for item in value if item))
+                    else:
+                        investigations_text.append(value.lstrip("- ").strip())
         if investigations_text:
             report.append("Investigations:")
             report.extend(investigations_text)
@@ -6849,7 +6859,7 @@ async def format_referral_letter(gpt_response):
     except Exception as e:
         error_logger.error(f"Error formatting referral letter: {str(e)}", exc_info=True)
         return f"Error formatting referral letter: {str(e)}"
-
+    
 # Add or update the format_psychology_session_notes function
 async def format_psychology_session_notes(gpt_response):
     """
