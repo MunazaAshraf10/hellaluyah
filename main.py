@@ -1997,7 +1997,8 @@ async def transcribe_audio_with_diarization(audio_data):
                     "metadata": {
                         "duration": results.get('duration', 0),
                         "channels": len(channels),
-                        "models": results.get('models', [])
+                        "models": results.get('models', []),
+                        "current_date": datetime.now().strftime("%m/%d/%Y")
                     }
                 }
 
@@ -3378,6 +3379,11 @@ Format your response as a valid JSON object according to the clinical report sch
         """
              
         elif template_type == "new_soap_note":
+            current_date = None
+            if "metadata" in transcription and "current_date" in transcription["metadata"]:
+                current_date = transcription["metadata"]["current_date"]
+                main_logger.info(f"[OP-{operation_id}] Using current_date from metadata: {current_date}")
+            
             user_instructions = f"""You are provided with a medical conversation transcript. 
             Analyze the transcript and generate a structured SOAP note following the specified template. 
             Use only the information explicitly provided in the transcript, and do not include or assume any additional details. 
@@ -3385,7 +3391,6 @@ Format your response as a valid JSON object according to the clinical report sch
             Address all chief complaints and issues separately in the S and A/P sections. 
             Make sure the output is in valid JSON format. 
             If the patient didnt provide the information regarding (S, PMedHx, SocHx, FHx, O, A/P) then ignore the respective section.
-            For time references (e.g., “this morning,” “last Wednesday”), convert to specific dates based on today’s date, current day's date whatever it is on calender.
             Include the all numbers in numeric format.
             Make sure the output is concise and to the point.
             Ensure that each point of S, PMedHx, SocHx, FHx, O starts with "- ", but for A/P it should not, just point them nicely and concisely.
@@ -3396,12 +3401,22 @@ Format your response as a valid JSON object according to the clinical report sch
             Add time related information in the report dont miss them.
             Make sure the point are concise and structured and looks professional.
             Dont repeat content in S, PMedHx, and O.
+            Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
             Below is the transcript:\n\n{conversation_text}"""
             
             
             system_message = f"""
             You are a highly skilled medical professional tasked with analyzing a provided medical transcription and generating a concise, well-structured SOAP note in valid JSON format. Follow the SOAP note template below, using only the information explicitly provided in the transcription. Do not include or assume any details not mentioned, and do not state that information is missing. Write in a professional, doctor-like tone, keeping phrasing succinct and clear. Group related chief complaints (e.g., fatigue and headache) into a single issue in the S and A/P sections when they share a likely etiology (e.g., stress-related symptoms), unless the transcription clearly indicates separate issues. Address each distinct issue separately in A/P only if explicitly presented as unrelated in the transcription. Summarize details accurately, focusing on the reasons for the visit, symptoms, and relevant medical history.
-
+            
+            Date Handling Instructions:
+                Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
+                Convert relative time references to specific dates based on the reference date:
+                    "This morning," "today," or similar terms refer to the reference date.
+                    "X days ago" refers to the reference date minus X days (e.g., "five days ago" is reference date minus 5 days).
+                    "Last week" refers to approximately 7 days prior, adjusting for specific days if mentioned (e.g., "last Wednesday" is the most recent Wednesday before the reference date).
+                Format all dates as MM/DD/YYYY (e.g., 06/10/2025) in the SOAP note output.
+                Do not use hardcoded dates or assumed years unless explicitly stated in the transcription.
+                Verify date calculations to prevent errors, such as incorrect years or misaligned days.
             {preservation_instructions} {grammar_instructions}
 
             SOAP Note Template:
@@ -3672,6 +3687,11 @@ Format your response as a valid JSON object according to the clinical report sch
             """
        
         elif template_type == "soap_issues":
+            current_date = None
+            if "metadata" in transcription and "current_date" in transcription["metadata"]:
+                current_date = transcription["metadata"]["current_date"]
+                main_logger.info(f"[OP-{operation_id}] Using current_date from metadata: {current_date}")
+            
 
             user_instructions= f"""You are provided with a medical conversation transcript. 
             Analyze the transcript and generate a structured SOAP ISSUES NOTE following the specified template. 
@@ -3691,10 +3711,22 @@ Format your response as a valid JSON object according to the clinical report sch
             Add time related information in the report dont miss them.
             Make sure the point are concise and structured and looks professional.
             Use medical terms to describe each thing
+            Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
             Below is the transcript:\n\n{conversation_text}
 
             """
             system_message = f"""You are a medical documentation assistant tasked with generating a clinical report in JSON format based solely on provided transcript, contextual notes, or clinical notes. The output must be a valid JSON object with the keys: "subjective", "past_medical_history", "objective", and "assessment_and_plan". 
+            
+            Date Handling Instructions:
+                Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
+                Convert relative time references to specific dates based on the reference date:
+                    "This morning," "today," or similar terms refer to the reference date.
+                    "X days ago" refers to the reference date minus X days (e.g., "five days ago" is reference date minus 5 days).
+                    "Last week" refers to approximately 7 days prior, adjusting for specific days if mentioned (e.g., "last Wednesday" is the most recent Wednesday before the reference date).
+                Format all dates as MM/DD/YYYY (e.g., 06/10/2025) in the SOAP note output.
+                Do not use hardcoded dates or assumed years unless explicitly stated in the transcription.
+                Verify date calculations to prevent errors, such as incorrect years or misaligned days.
+            
             {preservation_instructions} {grammar_instructions}
             Adhere to the following structured instructions:
 
@@ -3933,14 +3965,166 @@ Format your response as a valid JSON object according to the clinical report sch
             - Follow-up appointment scheduled
         
         """
+ 
+        elif template_type == "cardiology_letter":
+            current_date = None
+            if "metadata" in transcription and "current_date" in transcription["metadata"]:
+                current_date = transcription["metadata"]["current_date"]
+                main_logger.info(f"[OP-{operation_id}] Using current_date from metadata: {current_date}")
+            
 
-       
+            user_instructions= f"""You are provided with a medical conversation transcript. 
+            Analyze the transcript and generate a structured CARDIOLOGY CONSULT NOTE following the specified template. 
+            Use only the information explicitly provided in the transcript, and do not include or assume any additional details. 
+            Ensure the output is a valid JSON object with the CARDIOLOGY CONSULT NOTE sections formatted professionally and concisely in a doctor-like tone. 
+            Make sure the output is in valid JSON format. 
+            If the patient didnt provide the information regarding any section then ignore the respective section.
+            Include the all numbers in numeric format.
+            Make sure the output is concise and to the point.
+            ENsure the data in each section should be to the point and professional.
+            Make it useful as doctors perspective so it makes there job easier, dont just dictate and make a note, analyze the conversation, summarize it and make a note that best desrcibes the patient's case as a doctor's perspective.
+            Add time related information in the report dont miss them.
+            Make sure the point are concise and structured and looks professional.
+            Use medical terms to describe each thing.
+            Follow strictly the format given below, and always written same output format.
+            If data for any field is not available dont write anything under that heading and ignore it.
+            Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
+            Below is the transcript:\n\n{conversation_text}
+            """
+            system_message = f"""You are a medical documentation assistant tasked with generating a detailed and structured cardiac assessment report based on a predefined template. 
+            Your output must maintain a professional, concise, and doctor-like tone, avoiding verbose or redundant phrasing. 
+            All information must be sourced exclusively from the provided transcript, contextual notes, or clinical notes, and only explicitly mentioned details should be included. 
+            If information for a specific section or placeholder is unavailable, use "None known" for risk factors, medical history, medications, allergies, social history, and investigations, or omit the placeholder entirely for other sections as specified. 
+            Do not invent or infer patient details, assessments, plans, interventions, or follow-up care beyond what is explicitly stated. 
+            If data for any field is not available dont write anything under that heading and ignore it.
+           
+            Date Handling Instructions:
+                Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
+                Convert relative time references to specific dates based on the reference date:
+                    "This morning," "today," or similar terms refer to the reference date.
+                    "X days ago" refers to the reference date minus X days (e.g., "five days ago" is reference date minus 5 days).
+                    "Last week" refers to approximately 7 days prior, adjusting for specific days if mentioned (e.g., "last Wednesday" is the most recent Wednesday before the reference date).
+                Format all dates as MM/DD/YYYY (e.g., 06/10/2025) in the SOAP note output.
+                Do not use hardcoded dates or assumed years unless explicitly stated in the transcription.
+                Verify date calculations to prevent errors, such as incorrect years or misaligned days.
+            {preservation_instructions} {grammar_instructions}
+            Follow the structured guidelines below for each section of the report:
+
+            1. Patient Introduction:
+            - Begin the report with: "I had the pleasure of seeing [patient name] today. [patient pronoun] is a pleasant [patient age] year old [patient gender] that was referred for cardiac assessment."
+            - Insert patient name, pronoun (e.g., He/She/They), age, and gender exactly as provided in the transcript or context. If any detail is missing, leave the placeholder blank and proceed.
+
+            2. Cardiac Risk Factors:
+            - List under the heading "CARDIAC RISK FACTORS" in the following order: Increased BMI, Hypertension, Dyslipidemia, Diabetes mellitus, Smoker, Ex-smoker, Family history of atherosclerotic disease in first-degree relatives.
+            - For each risk factor, use verbatim text from contextual notes if available, updating only with new or differing information from the transcript.
+            - If no information is provided in the transcript or context, write "None known" for each risk factor.
+            - For Smoker, include pack-years, years smoked, and number of cigarettes or packs per day if mentioned in the transcript or context.
+            - For Ex-smoker, include only if the patient is not currently smoking. State the year quit and whether they quit remotely (e.g., "quit remotely in 2015") if mentioned. Omit this section if the patient is a current smoker.
+            - For Family history of atherosclerotic disease, specify if the patient’s mother, father, sister, brother, or child had a myocardial infarction, coronary angioplasty, coronary stenting, coronary bypass, peripheral arterial procedure, or stroke prior to age 55 (men) or 65 (women), as mentioned in the transcript or context.
+
+            3. Cardiac History:
+            - List under the heading "CARDIAC HISTORY" all cardiac diagnoses in the following order, if mentioned: heart failure (HFpEF or HFrEF), cardiomyopathy, arrhythmias (atrial fibrillation, atrial flutter, SVT, VT, AV block, heart block), devices (pacemakers, ICDs), valvular disease, endocarditis, pericarditis, tamponade, myocarditis, coronary disease.
+            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            - For heart failure, specify HFpEF or HFrEF and include ICD implantation details (date and model) if mentioned.
+            - For arrhythmias, include history of cardioversions and ablations (type and date) if mentioned.
+            - For AV block, heart block, or syncope, state if a pacemaker was implanted, including type, model, and date, if mentioned.
+            - For valvular heart disease, note the type of intervention (e.g., valve replacement) and date if mentioned.
+            - For coronary disease, summarize previous angiograms, coronary anatomy, and interventions (angioplasty, stenting, CABG) with graft details and dates if mentioned.
+            - Omit this section entirely if no cardiac history is mentioned in the transcript or context.
+
+            4. Other Medical History:
+            - List under the heading "OTHER MEDICAL HISTORY" all non-cardiac diagnoses and previous surgeries with associated years if mentioned.
+            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            - Write "None known" if no non-cardiac medical history is mentioned in the transcript or context.
+
+            5. Current Medications:
+            - List under the heading "CURRENT MEDICATIONS" in the following subcategories, each on a single line:
+                - Antithrombotic Therapy: Include aspirin, clopidogrel, ticagrelor, prasugrel, apixaban, rivaroxaban, dabigatran, edoxaban, warfarin.
+                - Antihypertensives: Include ACE inhibitors, ARBs, beta blockers, calcium channel blockers, alpha blockers, nitrates, diuretics (excluding furosemide, e.g., HCTZ, chlorthalidone, indapamide).
+                - Heart Failure Medications: Include Entresto, SGLT2 inhibitors, mineralocorticoid receptor antagonists, furosemide, metolazone, ivabradine.
+                - Lipid Lowering Medications: Include statins, ezetimibe, PCSK9 modifiers, fibrates, icosapent ethyl.
+                - Other Medications: Include any medications not listed above.
+            - For each medication, include dose, frequency, and administration if mentioned, and note the typical recommended dosage per tablet or capsule in parentheses if it differs from the patient’s dose.
+            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            - Write "None known" for each subcategory if no medications are mentioned.
+
+            6. Allergies and Intolerances:
+            - List under the heading "ALLERGIES AND INTOLERANCES" in sentence format, separated by commas, with reactions in parentheses if mentioned (e.g., "penicillin (rash), sulfa drugs (hives)").
+            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            - Write "None known" if no allergies or intolerances are mentioned.
+
+            7. Social History:
+            - List under the heading "SOCIAL HISTORY" in a short-paragraph narrative form.
+            - Include living situation, spousal arrangements, number of children, working arrangements, retirement status, smoking status, alcohol use, illicit or recreational drug use, and private drug/health plan status, if mentioned.
+            - For smoking, write "Smoking history as above" if the patient smokes or is an ex-smoker; otherwise, write "Non-smoker."
+            - For alcohol, specify the number of drinks per day or week if mentioned.
+            - Include comments on activities of daily living (ADLs) and instrumental activities of daily living (IADLs) if relevant.
+            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            - Write "None known" if no social history is mentioned.
+
+            8. History:
+            - List under the heading "HISTORY" in narrative paragraph form, detailing all reasons for the current visit, chief complaints, and a comprehensive history of presenting illness.
+            - Include mentioned negatives from exams and symptoms, as well as details on physical activities and exercise regimens, if mentioned.
+            - Only include information explicitly stated in the transcript or context.
+            - End with: "Review of systems is otherwise non-contributory."
+
+            9. Physical Examination:
+            - List under the heading "PHYSICAL EXAMINATION" in a short-paragraph narrative form.
+            - Include vital signs (blood pressure, heart rate, oxygen saturation), cardiac examination, respiratory examination, peripheral edema, and other exam insights only if explicitly mentioned in the transcript or context.
+            - If cardiac exam is not mentioned or normal, write: "Precordial examination was unremarkable with no significant heaves, thrills or pulsations. Heart sounds were normal with no significant murmurs, rubs, or gallops."
+            - If respiratory exam is not mentioned or normal, write: "Chest was clear to auscultation."
+            - If peripheral edema is not mentioned or normal, write: "No peripheral edema."
+            - Omit other physical exam insights if not mentioned.
+
+            10. Investigations:
+                - List under the heading "INVESTIGATIONS" in the following subcategories, each on a single line with findings and dates in parentheses followed by a colon:
+                - Laboratory investigations: List CBC, electrolytes, creatinine with GFR, troponins, NTpBNP or BNP level, A1c, lipids, and other labs in that order, if mentioned.
+                - ECGs: List ECG findings and dates.
+                - Echocardiograms: List echocardiogram findings and dates.
+                - Stress tests: List stress test findings (including stress echocardiograms and graded exercise challenges) and dates.
+                - Holter monitors: List Holter monitor findings and dates.
+                - Device interrogations: List device interrogation findings and dates.
+                - Cardiac perfusion imaging: List cardiac perfusion imaging findings and dates.
+                - Cardiac CT: List cardiac CT findings and dates.
+                - Cardiac MRI: List cardiac MRI findings and dates.
+                - Other investigations: List other relevant investigations and dates.
+                - Use verbatim text from contextual notes, updating only with new or differing transcript information.
+                - Write "None known" for each subcategory if no findings are mentioned.
+
+            11. Summary:
+                - List under the heading "SUMMARY" in a cohesive narrative paragraph.
+                - Start with: "[patient name] is a pleasant [age] year old [gender] that was seen today for cardiac assessment."
+                - Include: "Cardiac risk factors include [list risk factors]" if mentioned in the transcript or context.
+                - Summarize patient symptoms from the History section and cardiac investigations from the Investigations section, if mentioned.
+                - Omit risk factors or summary details if not mentioned.
+
+            12. Assessment/Plan:
+                - List under the heading "ASSESSMENT/PLAN" for each medical issue, structured as:
+                - #[number] [Condition]
+                - Assessment: [Current assessment of the condition, drawn from context and transcript]
+                - Plan: [Management plan, including investigations, follow-up, and reasoning for the plan, drawn from context and transcript. Include counselling details if mentioned.]
+                - Number each issue sequentially (e.g., #1, #2) and ensure all information is explicitly mentioned in the transcript or context.
+
+            13. Follow-Up:
+                - List under the heading "FOLLOW-UP" any follow-up plans and time frames explicitly mentioned in the transcript.
+                - If no time frame is specified, write: "Will follow-up in due course, pending investigations, or sooner should the need arise."
+
+            14. Closing:
+                - End the report with: "Thank you for the privilege of allowing me to participate in [patient’s name] care. Feel free to reach out directly if any questions or concerns."
+
+            Additional Instructions:
+            - Ensure strict adherence to the template structure, maintaining the exact order and headings as specified.
+            - Use "-  " only where indicated (e.g., Assessment/Plan).
+            - Write in complete sentences for narrative sections (History, Social History, Physical Examination, Summary).
+            - If data for any field is not available dont write anything under that heading and ignore it.
+            - Ensure all sections are populated only with explicitly provided data, preserving accuracy and professionalism.
+        """
         # Make the API request to GPT - Remove the response_format parameter which is causing the error
         response = client.chat.completions.create(
             model="gpt-4.1",
             messages=[
                 {"role": "system", "content": system_message},
-                {"role": "user", "content": user_instructions if template_type == "new_soap_note" or template_type == "detailed_soap_note" or template_type == "soap_issues" or template_type == "consult_note" or template_type == "referral_letter" else f"Here is a medical conversation. Please format it into a structured {template_type}. YOUR RESPONSE MUST BE VALID JSON:\n\n{conversation_text}"}
+                {"role": "user", "content": user_instructions if template_type == "new_soap_note" or template_type == "cardiology_letter" or template_type == "detailed_soap_note" or template_type == "soap_issues" or template_type == "consult_note" or template_type == "referral_letter" else f"Here is a medical conversation. Please format it into a structured {template_type}. YOUR RESPONSE MUST BE VALID JSON:\n\n{conversation_text}"}
             ],
             temperature=0.3, # Lower temperature for more consistent outputs
             response_format={"type": "json_object"}
@@ -4001,7 +4185,7 @@ async def format_report(gpt_response, template_type):
         elif template_type == "mental_health_appointment":
             return await format_mental_health_note(data)
         elif template_type == "cardiology_letter":
-            return await format_cardiology_letter(data)
+            return await format_cardiac_report(data)
         elif template_type == "followup_note":
             return await format_followup_note(data)
         elif template_type == "meeting_minutes":
@@ -5077,7 +5261,133 @@ async def format_new_soap(gpt_response):
         error_logger.error(f"Error formatting new SOAP note: {str(e)}", exc_info=True)
         return f"Error formatting new SOAP note: {str(e)}"
 
+async def format_cardiac_report(gpt_response):
+    """
+    Format a cardiac assessment report from a GPT structured response based on a predefined template.
+    
+    Args:
+        gpt_response: Dictionary containing the structured cardiac assessment data under 'CARDIOLOGY CONSULT NOTE'
+        
+    Returns:
+        Formatted string containing the human-readable cardiac assessment report
+    """
+    try:
+        # Extract the cardiology consult note from the response
+        consult_note = gpt_response.get('CARDIOLOGY CONSULT NOTE', {})
+        note = []
+        note.append("# CARDIOLOGY CONSULT\n")
+        # Patient Introduction
+        if consult_note.get("Patient Introduction"):
+            note.append(consult_note["Patient Introduction"])
+            note.append("")  # Blank line after section
+        # CARDIAC RISK FACTORS
+        if consult_note.get("CARDIAC RISK FACTORS"):
+            if isinstance(consult_note["CARDIAC RISK FACTORS"], dict):
+                # Handle dictionary case
+                if any(v != "None known" for k, v in consult_note["CARDIAC RISK FACTORS"].items()):
+                    note.append("## CARDIAC RISK FACTORS")
+                    for key, value in consult_note["CARDIAC RISK FACTORS"].items():
+                        if value != "None known":
+                            note.append(f"{key}: {value}")
+                    note.append("")  # Blank line after section
+            elif isinstance(consult_note["CARDIAC RISK FACTORS"], str):
+                # Handle string case
+                if consult_note["CARDIAC RISK FACTORS"].strip() and consult_note["CARDIAC RISK FACTORS"] != "None known":
+                    note.append("## CARDIAC RISK FACTORS")
+                    note.append(consult_note["CARDIAC RISK FACTORS"])
+                    note.append("")  # Blank line after section
+        # CARDIAC HISTORY
+        if consult_note.get("CARDIAC HISTORY") and consult_note["CARDIAC HISTORY"].strip():
+            note.append("## CARDIAC HISTORY")
+            note.append(consult_note["CARDIAC HISTORY"])
+            note.append("")  # Blank line after section
 
+        # OTHER MEDICAL HISTORY
+        if consult_note.get("OTHER MEDICAL HISTORY") and consult_note["OTHER MEDICAL HISTORY"] != "None known":
+            note.append("## OTHER MEDICAL HISTORY")
+            note.append(consult_note["OTHER MEDICAL HISTORY"])
+            note.append("")  # Blank line after section
+
+        # CURRENT MEDICATIONS
+        if consult_note.get("CURRENT MEDICATIONS") and any(
+            v != "None known" for v in consult_note["CURRENT MEDICATIONS"].values()
+        ):
+            note.append("## CURRENT MEDICATIONS")
+            for key, value in consult_note["CURRENT MEDICATIONS"].items():
+                if value != "None known":
+                    note.append(f"{key}: {value}")
+            note.append("")  # Blank line after section
+
+        # ALLERGIES AND INTOLERANCES
+        if consult_note.get("ALLERGIES AND INTOLERANCES") and consult_note["ALLERGIES AND INTOLERANCES"] != "None known":
+            note.append("## ALLERGIES AND INTOLERANCES")
+            note.append(consult_note["ALLERGIES AND INTOLERANCES"])
+            note.append("")  # Blank line after section
+
+        # SOCIAL HISTORY
+        if consult_note.get("SOCIAL HISTORY") and consult_note["SOCIAL HISTORY"] != "None known":
+            note.append("## SOCIAL HISTORY")
+            note.append(consult_note["SOCIAL HISTORY"])
+            note.append("")  # Blank line after section
+
+        # HISTORY
+        if consult_note.get("HISTORY") and consult_note["HISTORY"].strip():
+            note.append("## HISTORY")
+            note.append(consult_note["HISTORY"])
+            note.append("")  # Blank line after section
+
+        # PHYSICAL EXAMINATION
+        if consult_note.get("PHYSICAL EXAMINATION") and consult_note["PHYSICAL EXAMINATION"].strip():
+            note.append("## PHYSICAL EXAMINATION")
+            note.append(consult_note["PHYSICAL EXAMINATION"])
+            note.append("")  # Blank line after section
+
+        # INVESTIGATIONS
+        if consult_note.get("INVESTIGATIONS") and any(
+            v != "None known" for v in consult_note["INVESTIGATIONS"].values()
+        ):
+            note.append("## INVESTIGATIONS")
+            for key, value in consult_note["INVESTIGATIONS"].items():
+                if value != "None known":
+                    note.append(f"{key}: {value}")
+            note.append("")  # Blank line after section
+
+        # SUMMARY
+        if consult_note.get("SUMMARY") and consult_note["SUMMARY"].strip():
+            note.append("## SUMMARY")
+            note.append(consult_note["SUMMARY"])
+            note.append("")  # Blank line after section
+
+        # ASSESSMENT/PLAN
+        if consult_note.get("ASSESSMENT/PLAN"):
+            note.append("## ASSESSMENT/PLAN")
+            for item in consult_note["ASSESSMENT/PLAN"]:
+                # Extract condition name from the dictionary key
+                condition_key = list(item.keys())[0]
+                # Remove numeric prefix (e.g., "1 ") for display
+                condition_display = condition_key.split(" ", 1)[1] if condition_key[0].isdigit() else condition_key
+                note.append(f"### {condition_display}")
+                note.append(f"Assessment: {item[condition_key]['Assessment']}")
+                note.append(f"Plan: {item[condition_key]['Plan']}")
+                note.append("")  # Blank line after each condition
+
+        # FOLLOW-UP
+        if consult_note.get("FOLLOW-UP") and consult_note["FOLLOW-UP"].strip():
+            note.append("## FOLLOW-UP")
+            note.append(consult_note["FOLLOW-UP"])
+            note.append("")  # Blank line after section
+
+        # Closing
+        if consult_note.get("Closing"):
+            note.append(consult_note["Closing"])
+
+        # Ensure standard US English grammar (as per _grammar_instruction)
+        formatted_note = "\n".join(note)
+        return formatted_note
+    except Exception as e:
+        error_logger.error(f"Error formatting cardiac assessment report: {str(e)}", exc_info=True)
+        return f"Error formatting cardiac assessment report: {str(e)}"
+    
 async def format_soap_issues(gpt_response):
     """
     Format a new SOAP note from GPT structured response.
@@ -5346,173 +5656,6 @@ async def format_mental_health_note(gpt_response):
     except Exception as e:
         error_logger.error(f"Error formatting mental health note: {str(e)}", exc_info=True)
         return f"Error formatting mental health note: {str(e)}"
-
-async def format_cardiology_letter(gpt_response):
-    """
-    Format a cardiology letter from GPT structured response based on CARDIOLOGY_LETTER_SCHEMA.
-    
-    Args:
-        gpt_response: Dictionary containing the structured cardiology letter data
-        
-    Returns:
-        Formatted string containing the human-readable cardiology letter
-    """
-    try:
-        report = []
-        
-        # Add heading
-        report.append("# CARDIOLOGY LETTER\n")
-        
-        # Check if this is an echocardiogram report or consultation letter
-        is_echo_report = gpt_response.get("is_echocardiogram_report", False)
-        
-        # ---- HEADER SECTION ----
-        if "doctor_details" in gpt_response and gpt_response["doctor_details"]:
-            doctor = gpt_response["doctor_details"]
-            header_lines = []
-            
-            if doctor.get("name") and doctor.get("name") != "Not discussed":
-                header_lines.append(f"Dr {doctor['name']}")
-            
-            if doctor.get("credentials") and doctor.get("credentials") != "Not discussed":
-                header_lines.append(doctor['credentials'])
-            
-            if doctor.get("provider_number") and doctor.get("provider_number") != "Not discussed":
-                header_lines.append(f"Provider: {doctor['provider_number']}")
-            
-            if doctor.get("healthlink") and doctor.get("healthlink") != "Not discussed":
-                header_lines.append(f"Healthlink: {doctor['healthlink']}")
-            
-            if doctor.get("practice_address") and doctor.get("practice_address") != "Not discussed":
-                header_lines.append(doctor['practice_address'])
-            
-            if doctor.get("phone") and doctor.get("phone") != "Not discussed":
-                header_lines.append(f"Phone: {doctor['phone']}")
-            
-            if doctor.get("fax") and doctor.get("fax") != "Not discussed":
-                header_lines.append(f"Fax: {doctor['fax']}")
-            
-            for line in header_lines:
-                report.append(f"{line:>120}")
-            
-            report.append("")
-        
-        # ---- REFERRAL DETAILS SECTION ----
-        if "referral_details" in gpt_response and gpt_response["referral_details"]:
-            ref = gpt_response["referral_details"]
-            referral_lines = []
-            
-            if ref.get("referring_doctor") and ref.get("referring_doctor") != "Not discussed":
-                referral_lines.append(f"Referring Doctor: Dr {ref['referring_doctor']}")
-            
-            if ref.get("practice_name") and ref.get("practice_name") != "Not discussed":
-                referral_lines.append(f"Practice Name: {ref['practice_name']}")
-            
-            if ref.get("practice_address") and ref.get("practice_address") != "Not discussed":
-                referral_lines.append(f"Practice Address: {ref['practice_address']}")
-            
-            if ref.get("practice_phone") and ref.get("practice_phone") != "Not discussed":
-                referral_lines.append(f"Phone: {ref['practice_phone']}")
-            
-            if ref.get("practice_fax") and ref.get("practice_fax") != "Not discussed":
-                referral_lines.append(f"Fax: {ref['practice_fax']}")
-            
-            for line in referral_lines:
-                report.append(line)
-            
-            report.append("")
-        
-        # ---- PATIENT DETAILS SECTION ----
-        if "patient_details" in gpt_response and gpt_response["patient_details"]:
-            patient = gpt_response["patient_details"]
-            patient_lines = []
-            
-            if patient.get("name") and patient.get("name") != "Not discussed":
-                patient_lines.append(f"Patient Name: {patient['name']}")
-            
-            if patient.get("dob") and patient.get("dob") != "Not discussed":
-                patient_lines.append(f"Date of Birth: {patient['dob']}")
-            
-            if patient.get("address") and patient.get("address") != "Not discussed":
-                patient_lines.append(f"Address: {patient['address']}")
-            
-            if patient.get("phone") and patient.get("phone") != "Not discussed":
-                patient_lines.append(f"Phone: {patient['phone']}")
-            
-            if patient.get("mobile") and patient.get("mobile") != "Not discussed":
-                patient_lines.append(f"Mobile: {patient['mobile']}")
-            
-            for line in patient_lines:
-                report.append(line)
-            
-            report.append("")
-        
-        # ---- MEDICAL HISTORY SECTION ----
-        if "medical_history" in gpt_response and gpt_response["medical_history"]:
-            medical_history = [condition for condition in gpt_response["medical_history"] if condition != "Not discussed"]
-            if medical_history:
-                report.append("## Medical History")
-                for condition in medical_history:
-                    report.append(f"- {condition}")
-                report.append("")
-        
-        report.append("")
-        # ---- MEDICATIONS SECTION ----
-        if "medications" in gpt_response and gpt_response["medications"] != "Not discussed":
-            report.append("## Medications")
-            report.append(gpt_response["medications"])
-            report.append("")
-        report.append("")
-        
-        # ---- CONSULTATION NOTES SECTION ----
-        if "consultation_notes" in gpt_response and gpt_response["consultation_notes"] != "Not discussed":
-            report.append("##History")
-            report.append(gpt_response["consultation_notes"])
-            report.append("")
-        report.append("")
-        
-        # ---- EXAMINATION FINDINGS SECTION ----
-        if "examination_findings" in gpt_response and gpt_response["examination_findings"] != "Not discussed":
-            report.append("## Examination Findings")
-            report.append(gpt_response["examination_findings"])
-            report.append("")
-        report.append("")
-        
-        # ---- CURRENT PROBLEMS SECTION ----
-        if "current_problems" in gpt_response and gpt_response["current_problems"] != "Not discussed":
-            report.append("## Summary of Current Problems")
-            report.append(gpt_response["current_problems"])
-            report.append("")
-        report.append("")
-        
-        # ---- PLAN & RECOMMENDATIONS SECTION ----
-        if "plan_recommendations" in gpt_response and gpt_response["plan_recommendations"] != "Not discussed":
-            report.append("## Plan and Recommendations")
-            report.append(gpt_response["plan_recommendations"])
-            report.append("")
-        report.append("")
-        
-        # ---- CLOSING SECTION ----
-        if "closing" in gpt_response and gpt_response["closing"] != "Not discussed":
-            report.append(gpt_response["closing"])
-            report.append("")
-        
-        # ---- SIGNATURE SECTION ----
-        report.append("Yours sincerely,")
-        report.append("")
-        if "doctor_details" in gpt_response and gpt_response["doctor_details"]:
-            doctor = gpt_response["doctor_details"]
-            if doctor.get("name") and doctor.get("name") != "Not discussed":
-                report.append(f"Dr {doctor['name']}")
-            if doctor.get("credentials") and doctor.get("credentials") != "Not discussed":
-                report.append(doctor['credentials'])
-            report.append("Cardiologist")
-        
-        return "\n".join(report)
-    except Exception as e:
-        error_logger.error(f"Error formatting cardiology letter: {str(e)}", exc_info=True)
-        return f"Error formatting cardiology letter: {str(e)}"
-
 
 async def format_detailed_soap_note(gpt_response):
     """
