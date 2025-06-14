@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import httpx
+from aiohttp import ClientSession
 import os
 import openai
 import logging
@@ -23,6 +24,9 @@ from boto3.dynamodb.conditions import Attr
 import re
 from cryptography.fernet import Fernet
 import traceback
+import hashlib
+from pydub import AudioSegment
+import io
 
 # Load environment variables
 load_dotenv()
@@ -1078,6 +1082,12 @@ PSYCHOLOGY_SESSION_NOTES_SCHEMA = {
         "plan_for_next_session": {"type": "string"}
     }
 }
+# Reusable HTTP client
+http_client = httpx.AsyncClient(timeout=60.0)
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await http_client.aclose()
 
 # Add a WebSocket connection manager
 class ConnectionManager:
@@ -1213,7 +1223,7 @@ async def upload_audio(
                 return JSONResponse({"error": error_msg}, status_code=400)
 
         # Validate template type
-        valid_templates = ["clinical_report", "new_soap_note","soap_issues","detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes", "pathology_note", "consult_note","discharge_summary","case_formulation"]
+        valid_templates = ["clinical_report","h75", "new_soap_note","soap_issues","detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes", "pathology_note", "consult_note","discharge_summary","case_formulation"]
         main_logger.info(f"[REQ-{request_id}] Valid templates: {valid_templates}")
         main_logger.info(f"[REQ-{request_id}] Is template_type in valid_templates? {template_type in valid_templates}")
         
@@ -1571,7 +1581,7 @@ async def generate_template_report(
         formatted_report = None
 
         # Validate template type
-        valid_templates = ["clinical_report","new_soap_note","soap_issues" ,"detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes","pathology_note", "consult_note","discharge_summary","case_formulation"]
+        valid_templates = ["clinical_report","h75","new_soap_note","soap_issues" ,"detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes","pathology_note", "consult_note","discharge_summary","case_formulation"]
         
         if template_type not in valid_templates:
             error_msg = f"Invalid template type '{template_type}'. Must be one of: {', '.join(valid_templates)}"
@@ -1900,176 +1910,267 @@ async def process_transcription_results(deepgram_socket, websocket, client_id):
         print(f"Error details: {traceback.format_exc()}")
         raise
 
-@log_execution_time
-async def transcribe_audio_with_diarization(audio_data):
+
+# New audio processing functions
+def split_audio(audio_data: bytes, chunk_size_seconds: int = 60, target_format: str = "wav", target_sample_rate: int = 16000) -> list[bytes]:
     """
-    Transcribe audio with speaker diarization using Deepgram API.
-    
-    This function sends audio data to Deepgram's API for transcription
-    with speaker diarization (identifying different speakers). It processes
-    the API response to structure the conversation with speaker labels.
+    Split audio into chunks of specified duration, supporting multiple formats.
     
     Args:
-        audio_data: Binary audio data (WAV format) to transcribe
-        
+        audio_data: Raw audio bytes
+        chunk_size_seconds: Duration of each chunk in seconds
+        target_format: Output format (e.g., 'wav')
+        target_sample_rate: Target sample rate for transcription
+    
     Returns:
-        Dictionary containing the transcribed conversation with speaker information,
-        or an error message string if transcription failed
+        List of audio chunk bytes
     """
     try:
-        # Validate API key
-        if not DEEPGRAM_API_KEY:
-            error_logger.error("Deepgram API key is missing")
-            return "Error: Deepgram API key is not configured"
+        if not audio_data:
+            error_logger.error("Empty audio data provided")
+            raise ValueError("Audio data is empty")
 
-        url = "https://api.deepgram.com/v1/listen"
-        headers = {
-            "Authorization": f"Token {DEEPGRAM_API_KEY}",
-            "Content-Type": "audio/wav",
-            "Accept": "application/json"
+        # Attempt to load audio, with fallback to ffmpeg
+        try:
+            audio = AudioSegment.from_file(io.BytesIO(audio_data))
+        except CouldntDecodeError:
+            main_logger.warning("Could not decode audio directly, attempting with ffmpeg")
+            audio = AudioSegment.from_file(io.BytesIO(audio_data), format="mp3")
+        except Exception as e:
+            error_logger.error(f"Failed to load audio: {str(e)}")
+            raise ValueError(f"Unsupported or corrupted audio: {str(e)}")
+
+        main_logger.info(f"Audio format detected: channels={audio.channels}, sample_rate={audio.frame_rate}, duration={audio.duration_seconds:.2f}s")
+
+        # Normalize audio
+        audio = audio.set_channels(1).set_frame_rate(target_sample_rate)
+
+        # Handle short audio
+        if audio.duration_seconds < 1.0:
+            main_logger.warning("Audio duration is too short, creating single chunk")
+            chunk_buffer = io.BytesIO()
+            audio.export(chunk_buffer, format=target_format)
+            return [chunk_buffer.getvalue()]
+
+        # Split into chunks
+        chunks = []
+        for i in range(0, len(audio), chunk_size_seconds * 1000):
+            chunk = audio[i:i + chunk_size_seconds * 1000]
+            chunk_buffer = io.BytesIO()
+            chunk.export(chunk_buffer, format=target_format)
+            chunks.append(chunk_buffer.getvalue())
+        
+        main_logger.info(f"Split audio into {len(chunks)} chunks")
+        return chunks
+    except Exception as e:
+        error_logger.error(f"Error splitting audio: {str(e)}")
+        raise
+
+def merge_transcriptions(results: list[dict], chunk_durations: list[float]) -> dict:
+    """
+    Merge transcription results into a JSON structure with conversation and metadata.
+    Group words by speaker into sentences.
+    
+    Args:
+        results: List of transcription results from Deepgram
+        chunk_durations: List of durations for each chunk in seconds
+    
+    Returns:
+        Dictionary with conversation and metadata
+    """
+    try:
+        merged_words = []
+        current_time_offset = 0.0
+        for idx, result in enumerate(results):
+            if "results" not in result or "channels" not in result["results"]:
+                error_logger.warning(f"Invalid result structure for chunk {idx}")
+                current_time_offset += chunk_durations[idx]
+                continue
+            alternatives = result["results"]["channels"][0].get("alternatives", [])
+            if not alternatives:
+                error_logger.warning(f"No alternatives found for chunk {idx}")
+                current_time_offset += chunk_durations[idx]
+                continue
+            words = alternatives[0].get("words", [])
+            for word in words:
+                adjusted_word = {
+                    "speaker": f"Speaker {word.get('speaker', 'Unknown')}",
+                    "text": word.get("word", ""),
+                    "start": word.get("start", 0.0) + current_time_offset,
+                    "end": word.get("end", 0.0) + current_time_offset,
+                    "confidence": word.get("confidence", 0.0)
+                }
+                merged_words.append(adjusted_word)
+            current_time_offset += chunk_durations[idx]
+        
+        # Sort by start time
+        merged_words.sort(key=lambda x: x["start"])
+        
+        # Group into sentences by speaker
+        conversation = []
+        current_speaker = None
+        current_sentence = []
+        last_end_time = 0.0
+        for word in merged_words:
+            speaker = word["speaker"]
+            text = word["text"]
+            start_time = word["start"]
+            end_time = word["end"]
+            
+            # End sentence on speaker change or significant pause (>0.5s)
+            if (speaker != current_speaker or (start_time - last_end_time > 0.5)) and current_sentence:
+                conversation.append({
+                    "speaker": current_speaker,
+                    "text": " ".join(current_sentence).strip()
+                })
+                current_sentence = []
+            
+            current_sentence.append(text)
+            current_speaker = speaker
+            last_end_time = end_time
+        
+        # Append final sentence
+        if current_sentence:
+            conversation.append({
+                "speaker": current_speaker,
+                "text": " ".join(current_sentence).strip()
+            })
+        return {
+            "conversation": conversation,
+            "metadata": {
+                "duration": current_time_offset,
+                "channels": 1,
+                "models": [],
+                "current_date":  datetime.now().strftime("%m/%d/%Y"),
+            }
         }
+    except Exception as e:
+        error_logger.error(f"Error merging transcriptions: {str(e)}")
+        raise
 
-        # Enhanced parameters with stronger diarization settings
+async def transcribe_chunk(chunk: bytes, chunk_index: int, enable_diarization: bool = True, target_format: str = "wav") -> tuple[dict, float]:
+    """
+    Transcribe a single audio chunk with enhanced diarization.
+    
+    Args:
+        chunk: Audio chunk bytes
+        chunk_index: Index of the chunk for logging
+        enable_diarization: Whether to enable speaker diarization
+        target_format: Audio format for transcription
+    
+    Returns:
+        Tuple of transcription result and chunk duration
+    """
+    try:
+        # Check cache
+        chunk_hash = hashlib.sha256(chunk).hexdigest()
+        table = dynamodb.Table('transcripts')
+        response = table.get_item(Key={"id": chunk_hash})
+        if 'Item' in response:
+            main_logger.info(f"Retrieved cached transcription for chunk {chunk_index}")
+            result = json.loads(decrypt_data(response['Item']['transcript']))
+            duration = AudioSegment.from_file(io.BytesIO(chunk), format=target_format).duration_seconds
+            return result, duration
+
+        start_time = time.time()
         params = {
-            "topics": True,
-            "smart_format": True,
-            "punctuate": True,
-            "utterances": True,
+            "topics": "true",
+            "smart_format": "true",
+            "punctuate": "true",
+            "utterances": "true",
             "utt_split": 0.6,           # More aggressive utterance splitting
-            "diarize": True,
+            "diarize": "true",
             "diarization": {
                 "speakers": 2,          # Explicitly indicate 2 speakers
                 "sensitivity": "high"   # Increase sensitivity to speaker changes
             },
-            "sentiment": True,
+            "sentiment": "true",
             "language": "en",
             "model": "nova-2-medical"
         }
 
-        main_logger.info(f"Processing audio data of size: {len(audio_data)} bytes")
-        main_logger.info(f"Sending request to Deepgram API with enhanced diarization settings")
+        
+        async with ClientSession() as session:
+            async with session.post(
+                "https://api.deepgram.com/v1/listen",
+                headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"},
+                data=chunk,
+                params=params
+            ) as response:
+                response.raise_for_status()
+                result = await response.json()
 
-        # Make async request to Deepgram API
-        async with httpx.AsyncClient(timeout=1200.0) as client:
-            try:
-                response = await client.post(
-                    url,
-                    headers=headers,
-                    params=params,
-                    content=audio_data
-                )
-                
-                main_logger.info(f"Deepgram API Response Status: {response.status_code}")
-
-                if response.status_code != 200:
-                    error_msg = response.headers.get('dg-error', 'Unknown error occurred')
-                    error_logger.error(f"Deepgram API error: {error_msg}")
-                    return f"Error in transcription: {error_msg}"
-
-                try:
-                    response_json = response.json()
-                except json.JSONDecodeError as e:
-                    error_logger.error(f"Failed to decode JSON response: {str(e)}")
-                    return "Error: Invalid JSON response from transcription service"
-
-                # Process results
-                if 'results' not in response_json:
-                    error_logger.error("Missing 'results' in API response")
-                    return "Error: Invalid response structure from transcription service"
-
-                results = response_json['results']
-                channels = results.get('channels', [])
-                
-                if not channels:
-                    error_logger.error("No channels found in transcription results")
-                    return "Error: No transcription data found"
-                
-                channel = channels[0]
-                alternatives = channel.get('alternatives', [])
-                
-                if not alternatives:
-                    error_logger.error("No alternatives found in transcription results")
-                    return "Error: No transcription alternatives found"
-
-                # Prepare structure for the formatted response
-                formatted_response = {
-                    "conversation": [],
-                    "metadata": {
-                        "duration": results.get('duration', 0),
-                        "channels": len(channels),
-                        "models": results.get('models', []),
-                        "current_date": datetime.now().strftime("%m/%d/%Y")
-                    }
-                }
-
-                # Process utterances with detailed logging
-                alternative = alternatives[0]
-                
-                # Primarily try to use utterances for speaker separation
-                if 'utterances' in alternative:
-                    utterances = alternative['utterances']
-                    main_logger.info(f"Found {len(utterances)} utterances")
-                    
-                    for utterance in utterances:
-                        speaker = utterance.get('speaker', 0)
-                        text = utterance.get('transcript', '').strip()
-                        
-                        if text:
-                            formatted_response["conversation"].append({
-                                "speaker": f"Speaker {speaker}",
-                                "text": text
-                            })
-                elif 'words' in alternative:
-                    # Fallback: use word-level diarization
-                    words = alternative.get('words', [])
-                    main_logger.info(f"Using word-level diarization with {len(words)} words")
-                    
-                    if words:
-                        current_speaker = None
-                        current_text = []
-                        
-                        # Group consecutive words by the same speaker
-                        for word in words:
-                            speaker = word.get('speaker')
-                            if speaker != current_speaker and current_text:
-                                # New speaker detected, save previous utterance
-                                formatted_response["conversation"].append({
-                                    "speaker": f"Speaker {current_speaker or 0}",
-                                    "text": " ".join(current_text).strip()
-                                })
-                                current_text = []
-                            current_speaker = speaker
-                            current_text.append(word.get('word', ''))
-                        
-                        # Add final utterance
-                        if current_text:
-                            formatted_response["conversation"].append({
-                                "speaker": f"Speaker {current_speaker or 0}",
-                                "text": " ".join(current_text).strip()
-                            })
-                else:
-                    # Final fallback - just use the entire transcript with no speaker distinction
-                    transcript = alternative.get('transcript', '')
-                    if transcript:
-                        formatted_response["conversation"].append({
-                            "speaker": "Speaker 0",
-                            "text": transcript
-                        })
-
-                main_logger.info(f"Formatted {len(formatted_response['conversation'])} conversation segments")
-                return formatted_response
-
-            except httpx.TimeoutException:
-                error_logger.error("Request timed out")
-                return "Error: Request timed out"
-            except httpx.RequestError as e:
-                error_logger.error(f"Request failed: {str(e)}")
-                return f"Error: Request failed - {str(e)}"
-
+        # Cache result
+        duration = AudioSegment.from_file(io.BytesIO(chunk), format=target_format).duration_seconds
+        await save_transcript_to_dynamodb(
+            result,
+            {"chunk_hash": chunk_hash, "chunk_index": chunk_index},
+            status="completed",
+            transcript_id=chunk_hash
+        )
+        
+        main_logger.info(f"Chunk {chunk_index} transcription took {time.time() - start_time:.2f} seconds")
+        return result, duration
     except Exception as e:
-        error_logger.exception("Unexpected error in transcription")
-        return f"Error in transcription: {str(e)}"
+        error_logger.error(f"Error transcribing chunk {chunk_index}: {str(e)}")
+        return {"error": str(e)}, 0.0
 
+@log_execution_time
+async def transcribe_audio_with_diarization(audio_data: bytes, enable_diarization: bool = True) -> dict:
+    """
+    Transcribe audio with diarization by splitting into chunks and processing in parallel.
+    Returns JSON with status, transcription_status, transcript_id, and transcription.
+    
+    Args:
+        audio_data: Raw audio bytes
+        enable_diarization: Whether to enable speaker diarization
+    
+    Returns:
+        JSON transcription result
+    """
+    try:
+        start_time = time.time()
+        main_logger.info(f"Starting transcription for audio of size {len(audio_data)} bytes")
+        
+        # Split audio into chunks
+        chunks = split_audio(audio_data)
+        
+        # Transcribe chunks in parallel
+        max_concurrent_tasks = 5
+        tasks = [
+            transcribe_chunk(chunk, idx, enable_diarization)
+            for idx, chunk in enumerate(chunks)
+        ]
+        results = []
+        for i in range(0, len(tasks), max_concurrent_tasks):
+            batch_results = await asyncio.gather(*tasks[i:i + max_concurrent_tasks], return_exceptions=True)
+            results.extend(batch_results)
+        
+        # Separate successful results and durations
+        transcription_results = []
+        chunk_durations = []
+        for idx, (result, duration) in enumerate(results):
+            if isinstance(result, dict) and "error" not in result:
+                transcription_results.append(result)
+                chunk_durations.append(duration)
+            else:
+                error_logger.error(f"Chunk {idx} failed: {result.get('error', 'Unknown error')}")
+        
+        if not transcription_results:
+            error_msg = "Error: All chunks failed to transcribe"
+            error_logger.error(error_msg)
+            return {"error": error_msg}
+        # Merge results
+        transcription = merge_transcriptions(transcription_results, chunk_durations)
+        main_logger.info(f"Transcription completed in {time.time() - start_time:.2f} seconds")
+        # Construct final output without nested transcription
+        return transcription
+        
+    except Exception as e:
+        error_msg = f"Error in transcription: {str(e)}"
+        error_logger.error(error_msg, exc_info=True)
+        return {"error": error_msg}
+    
 @log_execution_time
 async def generate_gpt_response(transcription, template_type):
     """
@@ -2096,7 +2197,22 @@ async def generate_gpt_response(transcription, template_type):
         
         # Select system message based on template type
         system_message = "You are a clinical documentation expert. Format the conversation into structured clinical notes."
-
+        
+        current_date = None
+        if "metadata" in transcription and "current_date" in transcription["metadata"]:
+            current_date = transcription["metadata"]["current_date"]
+                
+        date_instructions = """
+        Date Handling Instructions:
+                Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
+                Convert relative time references to specific dates based on the reference date:
+                    "This morning," "today," or similar terms refer to the reference date.
+                    "X days ago" refers to the reference date minus X days (e.g., "five days ago" is reference date minus 5 days).
+                    "Last week" refers to approximately 7 days prior, adjusting for specific days if mentioned (e.g., "last Wednesday" is the most recent Wednesday before the reference date).
+                Format all dates as DD/MM/YYYY (e.g., 10/06/2025) in the SOAP note output.
+                Do not use hardcoded dates or assumed years unless explicitly stated in the transcription.
+                Verify date calculations to prevent errors, such as incorrect years or misaligned days.
+        """
         # Core instructions for all medical documentation templates
         preservation_instructions = """
 CRITICAL INSTRUCTIONS:
@@ -2795,15 +2911,361 @@ By following these instructions, ensure the referral letter is accurate, profess
 
 """
         # Similar detailed instructions would be added for other template types
-        
+        elif template_type == "mental_health_appointment":
+            current_date = None
+            if "metadata" in transcription and "current_date" in transcription["metadata"]:
+                current_date = transcription["metadata"]["current_date"]
+                main_logger.info(f"[OP-{operation_id}] Using current_date from metadata: {current_date}")
+            user_instructions= f"""You are a clinical psychologist tasked with generating a structured clinical report in JSON format based on a provided conversation transcript from a client's first appointment. 
+            Analyze the transcript and produce a clinical note following the specified template. 
+            Use only information explicitly provided in the transcript or contextual notes, and do not include or assume additional details. 
+            Do not repeat anything.
+            Make each point concise and at the begining of it write "-  " and if some field has no data then ignore then field dont write anything under it. Make it to the point no need to use words like patient, client or anything make it direct.
+            Be concise, to the point and make intelligent remarks.
+            Ensure the output is a valid JSON object. 
+            Format professionally and concisely in a doctor-like tone using medical terminology. Capture all discussed topics, including non-clinical ones relevant to mental health care. Convert time references to DD/MM/YYYY format based on {current_date if current_date else "15/06/2025"}. Ensure points start with '- ', except for the case_formulation paragraph. Make the report concise, structured, and professional, describing the case directly without using 'patient' or 'client.' Omit sections with no data. Avoid repetition.
+            Below is the transcript:\n\n{conversation_text}
+            """
+
+            system_message = f"""You are a highly skilled clinical psychologist tasked with generating a professional, medically sound clinical report in JSON format based on a provided conversation transcript from a client's first appointment. Analyze the transcript thoroughly, extract relevant information, and produce a structured clinical note following the specified template. Use only information explicitly provided in the transcript or contextual notes, and do not include or assume additional details. Ensure the output is a valid JSON object with the specified sections, formatted professionally and concisely in a doctor-like tone using medical terminology. Capture all discussed topics, including non-clinical ones, as they may be relevant to mental health care. Convert time references to specific dates in DD/MM/YYYY format based on {current_date if current_date else "15/06/2025"}. Ensure each point starts with "- " (dash followed by a space), except for the case_formulation paragraph. Make the report concise, structured, and professional, describing the case directly from a doctor's perspective without using terms like "patient" or "client." 
+            Avoid repetition and omit sections with no data.
+            {grammar_instructions} {preservation_instructions} {date_instructions}
+
+
+            Template Structure:
+
+            - Chief Complaint: Primary mental health issue, presenting symptoms
+            - Past medical & psychiatric history: Past psychiatric diagnoses, treatments, hospitalisations, current medications or medical conditions
+            - Family History: Psychiatric illnesses
+            - Social History: Occupation, level of education, substance use (smoking, alcohol, recreational drugs), social support
+            - Mental Status Examination: Appearance, behaviour, speech, mood, affect, thoughts, perceptions, cognition, insight, judgment
+            - Risk Assessment: Suicidality, homicidality, other risks
+            - Diagnosis: DSM-5 criteria, psychological scales/questionnaires
+            - Treatment Plan: Investigations performed, medications, psychotherapy, family meetings & collateral information, psychosocial interventions, follow-up appointments and referrals
+            - Safety Plan: If applicable, detailing steps to take in crisis
+
+            Instructions:
+
+            Input Analysis: Analyze the entire transcript to capture all discussed topics, including non-clinical aspects relevant to mental health care. Use only explicitly provided data, avoiding fabrication or inference.
+            Template Adherence: Include only sections and placeholders explicitly mentioned in the transcript or contextual notes. Omit sections with no data (leave as empty arrays or strings in JSON). Add additional_notes for topics not fitting the template.
+            JSON Structure: Output a valid JSON object with the above keys, populated only with explicitly provided data.
+            Verify date accuracy.
+            Professional Tone and Terminology: Use a concise, doctor-like tone with medical terminology (e.g., "Reports anhedonia and insomnia since 15/05/2025"). Avoid repetition, direct quotes, or colloquial language.
+            Formatting:
+            Ensure each point in all sections except clinical_formulation.case_formulation starts with "- ".
+            
+            Constraints:
+            Use only transcript or contextual note data. Do not invent details, assessments, or plans.
+            Maintain a professional tone for medical documentation.
+            Do not assume unmentioned information (e.g., normal findings, symptoms).
+            If no transcript is provided, return an empty JSON structure.
+
+
+            Output: Generate a valid JSON object adhering to the template, populated only with explicitly provided data.
+
+            Example for Reference (Do Not Use as Input):
+
+
+            Example 1:
+            
+            Example Transcription:
+            Speaker 0 : Good morning i'm doctor sarah what brings you in today
+            Speaker 1 : Good morning i have been feeling really unwell for the past week i have a constant cough shortness of breath and my chest feels tight i also have a low grade fever that comes and goes
+            Speaker 0 : That sounds uncomfortable when did these symptoms start
+            Speaker 1 : About six days ago at first i thought it was just a cold but it's getting worse i get tired just walking a few steps
+            Speaker 0 : Are you producing any mucus with the cough
+            Speaker 1 : Yes it's yellowish green and like sometimes it's hard to breathe
+            Speaker 0 : Especially at night any wheezing or chest pain
+            Speaker 1 : A little wheezing and my chest feels heavy no sharp pain though do you have
+            Speaker 0 : A history of asthma copd or any lung condition?
+            Speaker 1 : I have a mild asthma i use an albuterol inhaler occasionally maybe once or twice a week
+            Speaker 0 : Any history of smoking i smoked in college but
+            Speaker 1 : I quit ten years ago
+            Speaker 0 : Do you have any allergic or chronic illness like diabetes hypertension or gerd
+            Speaker 1 : I have type two diabetes diagnosed three years ago i take metamorphin five hundred mg twice a day no known allergies
+            Speaker 0 : Any recent travel or contact with someone who's been sick
+            Speaker 1 : No travel but my son had a very bad cold last week
+            Speaker 0 : Alright let me check your vitals and listen to your lung your temperature is 106 respiratory rate is 22 oxygen saturation is 94 and heart rate is 92 beats per minute i hear some wheezing and crackles in both lower lung field your throat looks a bit red and post nasal drip is present
+            Speaker 1 : Is it a chest infection
+            Speaker 0 : Based on your symptoms history and exam it sounds like acute bronchitis possibly comp complicated by asthma and diabetes it's likely viral but with your underlying condition we should be cautious medications i'll prescribe amoxicillin chloride eight seventy five mg or one twenty five mg twice daily for seven days just in case there's a bacterial component continue using your albuterol inhaler but increase to every four to six six hours as needed i'm also prescribing a five day course of oral prednisone forty mg per day to reduce inflammation due to your asthma flare for the cough you can take guifenacin with dex with dextromethorphan as needed check your blood glucose more frequently while on prednisone as it can raise your sugar levels if your oxygen drops below 92 or your breathing worsens go to the emergency rest stay hydrated and avoid exertion use a humidifier at night and avoid cold air i want to see you back in three to five days to recheck your lungs and sugar control if symptoms worsen sooner come in immediately okay that makes sense will these make me sleepy the cough syrup might so take it at night and remember don't drive after taking it let me print your ex prescription and set your follow-up"
+
+            Example MENTAL HEALTH NOTE:
+
+            Chief Complaint: Cough, shortness of breath, chest tightness, low-grade fever for 6 days
+
+            Past medical & psychiatric history: Mild asthma (uses albuterol inhaler 1-2 times weekly), Type 2 diabetes diagnosed 3 years ago (takes metformin 500mg twice daily), Ex-smoker (quit 10 years ago)
+
+            Family History: No psychiatric illnesses noted
+
+            Social History: No occupation or education level mentioned, Ex-smoker (quit 10 years ago), No alcohol or recreational drug use mentioned, Son at home (recently had severe cold)
+
+            Mental Status Examination: Not assessed
+
+            Risk Assessment: No suicidality, homicidality or other risks noted
+
+            Diagnosis: Acute bronchitis with asthma exacerbation
+
+            Treatment Plan: 
+            - Amoxicillin clavulanate 875/125mg twice daily for 7 days
+            - Increase albuterol inhaler to every 4-6 hours as needed
+            - Prednisone 40mg daily for 5 days
+            - Guaifenesin with dextromethorphan for cough as needed
+            - Monitor blood glucose more frequently while on prednisone
+            - Rest, hydration, avoid exertion
+            - Use humidifier at night, avoid cold air
+            - Follow-up in 3-5 days to reassess lungs and glucose control
+
+            Safety Plan: Seek emergency care if oxygen saturation drops below 92% or breathing worsens
+                        
+            """
+            
         elif template_type == "clinical_report":
+            current_date = None
+            if "metadata" in transcription and "current_date" in transcription["metadata"]:
+                current_date = transcription["metadata"]["current_date"]
+                main_logger.info(f"[OP-{operation_id}] Using current_date from metadata: {current_date}")
+            
+            user_instructions = f"""You are a clinical psychologist tasked with generating a structured clinical report in JSON format based on a provided conversation transcript from a client's first appointment. Analyze the transcript and produce a clinical note following the specified template. Use only information explicitly provided in the transcript or contextual notes, and do not include or assume additional details. Ensure the output is a valid JSON object with the specified sections, formatted professionally and concisely in a doctor-like tone. Capture all discussed topics, including non-clinical ones, as they may be relevant to mental health care. Convert time references to specific dates in DD/MM/YYYY format based on {current_date if current_date else "the current date"}. Ensure each point starts with '- ' (dash followed by a space), except for the case formulation paragraph. Make the report concise, structured, and professional, using medical terminology to describe the client's case from a doctor's perspective.
+            DO not repeat anything.
+            Make each point concise and at the begining of it write "-  " and if some field has no data then ignore then field dont write anything under it. Make it to the point no need to use words like patient, client or anything make it direct.
+            Below is the transcript:\n\n{conversation_text}
+            """
             # Clinical Report Instructions - Updated to emphasize preservation
-            system_message = f"""You are a clinical documentation expert specializing in comprehensive clinical reports.
-{preservation_instructions}
-{grammar_instructions}
-Format your response as a valid JSON object according to the clinical report schema.
-...existing schema here...
-"""
+            system_message = f"""You are a highly skilled clinical psychologist tasked with generating a professional, medically sound clinical report based on a provided conversation transcript from a client's first appointment with a clinical psychologist. 
+            Your role is to analyze the transcript thoroughly, extract relevant information, and produce a structured clinical note in JSON format following the specified template. 
+            The report must be concise, professional, and written from a doctor's perspective, using precise medical terminology to facilitate clinical decision-making. 
+            {grammar_instructions} {preservation_instructions} {date_instructions}
+           
+            Below are the instructions for generating the report:
+
+            Input Analysis: Analyze the entire conversation transcript to capture all discussed topics, including those not explicitly clinical, as they may be significant to the client's mental health care. Use only information explicitly provided in the transcript or contextual notes. Do not fabricate or infer additional details.
+            Template Adherence: Follow the provided clinical note template, including only sections and placeholders explicitly mentioned in the transcript or contextual notes. Omit any sections or placeholders not supported by the transcript, leaving them blank (empty strings or arrays in JSON). Add new sections if necessary to capture unique topics discussed in the transcript not covered by the template.
+            Format: Make each point concise and at the begining of it write "-  " and if some field has no data then ignore then field dont write anything under it. Make it to the point no need to use words like patient, client or anything make it direct.
+            JSON Structure: Output a valid JSON object with the following top-level keys, populated only with data explicitly mentioned in the transcript or contextual notes:
+                presenting_problems
+                history_of_presenting_problems
+                current_functioning
+                current_medications
+                psychiatric_history
+                medical_history
+                developmental_social_family_history
+                substance_use
+                relevant_cultural_religious_spiritual_issues
+                risk_assessment
+                mental_state_exam
+                test_results
+                diagnosis
+                clinical_formulation
+                additional_notes
+            Professional Tone and Terminology: Use a concise, professional, doctor-like tone with medical terminology (e.g., "Client reports dysphoric mood and anhedonia for one month"). Avoid repetition, direct quotes, or colloquial language. Use "Client" instead of "patient" or the client's name.
+            Formatting: Ensure each point in relevant sections (e.g., presenting_problems, history_of_presenting_problems, current_functioning, etc.) begins with "- " (dash followed by a single space). For clinical_formulation.case_formulation, use a single paragraph without bullet points. For additional_notes, use bullet points for any information not fitting the template.
+            Section-Specific Instructions:
+                - Presenting Problems: List each distinct issue or topic as an object in an array under presenting_problems, with a field details containing bullet points capturing the reason for the visit and associated stressors.
+                - History of Presenting Problems: For each issue, include an object in an array with fields for issue_name and details (onset, duration, course, severity).
+                - Current Functioning: Include sub-keys (sleep, employment_education, family, etc.) as arrays of bullet points, only if mentioned.
+                - Clinical Formulation: Include a case_formulation paragraph summarizing presenting problems, predisposing, precipitating, perpetuating, and protective factors, only if explicitly mentioned. Also include arrays for each factor type with bullet points.
+                - Additional Notes: Capture any transcript information not fitting the template as bullet points.
+            Constraints:
+            Use only data from the transcript or contextual notes. Do not invent details, assessments, plans, or interventions.
+            Maintain a professional tone suitable for medical documentation.
+            Do not assume information (e.g., normal findings, unmentioned symptoms) unless explicitly stated.
+            If no transcript is provided, return the JSON structure with all fields as empty strings or arrays.
+            Output: Generate a valid JSON object adhering to the template and constraints, populated only with explicitly provided data.
+
+            CLINICAL INTERVIEW REPORT TEMPLATE:
+
+            (The template or structure below is intended to be used for a first appoinments with clinical psychologists,  It is important that you note that the details of the topics discussed in the transcript may vary greatly between patients, as a large proportion of the information intended for placeholders in square brackets in the template or structure below may already be known. If there is no specific mention in the transcript or contextual notes of the relevant information for a placeholder below, you should not include the placeholder in the clinical note or document that you output - instead you should leave it blank. Do not hallucinate or make up any information for a placeholder in the template or structure below if it is not mentioned or present in the transcript. The topics discussed in the transcript by clinical psychologists are sometimes not well-defined clinical disease states or symptoms and are often just aspects of the patient's life that are important to them and they wish to discuss with their clinician. Therefore it is vital that the entire transcript is used and included in the clinical note or document that you output, as even brief topic discussions may be an important part of the patient's mental health care. The placeholders below should therefore be used as a rough guide to how the information in the transcript should be captured in the clinical note or document, but you should interpret the topics discussed and then use your judgement to either: exclude sections from the template or structure below because it is not relevant to the clinical note or document based on the details of the topics discussed in the transcript, or include new sections that are not currently present in the template or structure, in order to accurately capture the details of the topics discussed in the transcript. Remember to use as many bullet points as you need to capture the relevant details from the transcript for each section. Do not respond to these guidelines in your output, you must only output the clinical note or document as instructed.)
+
+            CLINICAL INTERVIEW:
+            "PRESENTING PROBLEM(s)"
+            - [Detail presenting problems.] (use as many bullet points as needed to capture the reason for the visit and any associated stressors in detail) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            HISTORY OF PRESENTING PROBLEM(S)
+            - History of Presenting Problem(s): [Detail the history of the presenting Problem(s) and include onset, duration, course, and severity of the symptoms or problems.] (use as many bullet points as needed to capture when the symptoms or problem started, the development and course of symptoms) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            CURRENT FUNCTIONING
+            - Sleep: [Detail sleep patterns.] (use as many bullet points as needed to capture the sleep pattern and how the problem has affected sleep patterns) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank).
+
+            - Employment/Education: [Detail current employment or educational status.] (use as many bullet points as needed to capture current employment or educational status and how the symptoms or problem has affected current employment or education) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank).
+
+            - Family: [Detail family dynamics and relationships.] (use as many bullet points as needed to capture names, ages of family members and the relationships with each other and the effect of symptoms on the family dynamics and relationships) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank).
+
+            - Social: [Describe social interactions and the patient’s support network.] (use as many bullet points as needed to capture the social interactions of the patient and the patient’s support network) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank).
+
+            - Exercise/Physical Activity: [Detail exercise routines or physical activities] (use as many bullet points as needed to capture all exercise and physical activity and the effect the symptoms have had on the patient’s exercise and physical activity) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            - Eating Regime/Appetite: [Detail the eating habits and appetite] (use as many bullet points as needed to capture all eating habits and appetite and the effect the symptoms have had on the patient’s eating habits and appetite) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank).
+
+            - Energy Levels: [Detail energy levels throughout the day and the effect the symptoms have had on energy levels] (use as many bullet points as needed to capture the patient’s energy levels and the effect the symptoms or problems have had on the patient’s energy levels) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            - Recreational/Interests: [Mention hobbies or interests and the effect the patient’s symptoms have had on their hobbies and interests] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            CURRENT MEDICATIONS
+            - Current Medications: [List type, frequency, and daily dose in detail] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            PSYCHIATRIC HISTORY
+            - Psychiatric History: [Detail any psychiatric history including hospitalisations, treatment from psychiatrists, psychological treatment, counselling, and past medications – type, frequency and dose] (use as many bullet points as needed to capture the patient’s psychiatric history) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            - Other interventions: [Detail any other interventions not mentioned in Psychiatric History] (Use as many bullet points as needed to capture all interventions) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            MEDICAL HISTORY
+            - Personal and Family Medical History: [Detail personal and family medical history] (Use as many bullet points as needed to capture the patient’s medical history and the patient’s family medical history) (only include if explicitly mentioned in the contextual notes or clinical note, otherwise leave blank)
+
+            DEVELOPMENTAL, SOCIAL AND FAMILY HISTORY
+            Family:
+            - Family of Origin [Detail the family of origin] (use as many bullet points as needed to capture the patient’s family at birth, including parent’s names, their occupations, the parent's relationship with each other, and other siblings) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            Developmental History:
+            - Developmental History [Detail developmental milestones and any issues] (use as many bullet points as needed to capture developmental history) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            Educational History
+            - Educational History: [Detail educational history, including academic achievement, relationship with peers, and any issues] (use as many bullet points as needed to capture educational history) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            Employment History
+            - Employment History: [Detail employment history and any issues] (use as many bullet points as needed to capture employment history) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            Relationship History
+            - Relationship History: [Detail relationship history and any issues] (use as many bullet points as needed to capture the relationship history) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            Forensic/Legal History
+            - Forensic and Legal History: [Detail any forensic or legal history] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            SUBSTANCE USE
+            - Substance Use: [Detail any current and past substance use] (use as many bullet points as needed to capture current and past substance use including type and frequency) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            RELEVANT CULTURAL/RELIGIOUS/SPIRITUAL ISSUES
+            - Relevant Cultural/Religious/Spiritual Issues: [Detail any cultural, religious, or spiritual factors that are relevant] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            RISK ASSESSMENT
+            Risk Assessment:
+            - Suicidal Ideation: [History, attempts, plans] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Homicidal Ideation: [Describe any homicidal ideation] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Self-harm: [Detail any history of self-harm] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Violence & Aggression: [Describe any incidents of violence or aggression] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Risk-taking/Impulsivity: [Describe any risk-taking behaviors or impulsivity] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            MENTAL STATE EXAM:
+            - Appearance: [Describe the patient's appearance] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Behaviour: [Describe the patient's behaviour] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Speech: [Detail speech patterns] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Mood: [Describe the patient's mood] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Affect: [Describe the patient's affect] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Perception: [Detail any hallucinations or dissociations] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Thought Process: [Describe the patient's thought process] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Thought Form: [Detail the form of thoughts, including any disorderly thoughts] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Orientation: [Detail orientation to time and place] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Memory: [Describe memory function] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Concentration: [Detail concentration levels] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Attention: [Describe attention span] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Judgement: [Detail judgement capabilities] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Insight: [Describe the patient's insight into their condition] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            TEST RESULTS 
+            Summary of Findings: [Summarize the findings from any formal psychometric assessments or self-report measures] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            DIAGNOSIS:
+            - Diagnosis: [List any DSM-5-TR diagnosis and any comorbid conditions] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            CLINICAL FORMULATION:
+            - Presenting Problem: [Summarise the presenting problem]  (Use as many bullet points as needed to capture the presenting problem) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            - Predisposing Factors: [List predisposing factors to the patient's condition] (Use as many bullet points as needed to capture the predisposing factors) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            - Precipitating Factors: [List precipitating factors that may have triggered the condition] (Use as many bullet points as needed to capture the precipitating factors)  (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            - Perpetuating Factors: [List factors that are perpetuating the condition]  (Use as many bullet points as needed to capture the perpetuating factors) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            - Protecting Factors: [List factors that protect the patient from worsening of the condition]  (Use as many bullet points as needed to capture the protective factors) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            Case formulation: 
+            [Detail a case formulation as a paragraph] [Client presents with (problem), which appears to be precipitated by (precipitating factors). Factors that seem to have predisposed the client to the (problem) include (predisposing factors). The current problem is maintained by (perpetuating factors). However, the protective and positive factors include (Protective factors)].
+
+            (Ensure all information discussed in the transcript is included under the relevant heading or sub-heading above, otherwise include it as a bullet-pointed additional note at the end of the note.) (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes or clinical note as a reference for the information include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes or clinical note, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)  (Always use the word "Client" instead of the word "patient" or their name.)  (Ensure all information is super detailed and do not use quotes.)
+
+
+            Example for Reference (Do Not Use as Input):
+
+
+            Example 1:
+            
+            Example Transcription:
+            Speaker 0 : Good morning i'm doctor sarah what brings you in today
+            Speaker 1 : Good morning i have been feeling really unwell for the past week i have a constant cough shortness of breath and my chest feels tight i also have a low grade fever that comes and goes
+            Speaker 0 : That sounds uncomfortable when did these symptoms start
+            Speaker 1 : About six days ago at first i thought it was just a cold but it's getting worse i get tired just walking a few steps
+            Speaker 0 : Are you producing any mucus with the cough
+            Speaker 1 : Yes it's yellowish green and like sometimes it's hard to breathe
+            Speaker 0 : Especially at night any wheezing or chest pain
+            Speaker 1 : A little wheezing and my chest feels heavy no sharp pain though do you have
+            Speaker 0 : A history of asthma copd or any lung condition?
+            Speaker 1 : I have a mild asthma i use an albuterol inhaler occasionally maybe once or twice a week
+            Speaker 0 : Any history of smoking i smoked in college but
+            Speaker 1 : I quit ten years ago
+            Speaker 0 : Do you have any allergic or chronic illness like diabetes hypertension or gerd
+            Speaker 1 : I have type two diabetes diagnosed three years ago i take metamorphin five hundred mg twice a day no known allergies
+            Speaker 0 : Any recent travel or contact with someone who's been sick
+            Speaker 1 : No travel but my son had a very bad cold last week
+            Speaker 0 : Alright let me check your vitals and listen to your lung your temperature is 106 respiratory rate is 22 oxygen saturation is 94 and heart rate is 92 beats per minute i hear some wheezing and crackles in both lower lung field your throat looks a bit red and post nasal drip is present
+            Speaker 1 : Is it a chest infection
+            Speaker 0 : Based on your symptoms history and exam it sounds like acute bronchitis possibly comp complicated by asthma and diabetes it's likely viral but with your underlying condition we should be cautious medications i'll prescribe amoxicillin chloride eight seventy five mg or one twenty five mg twice daily for seven days just in case there's a bacterial component continue using your albuterol inhaler but increase to every four to six six hours as needed i'm also prescribing a five day course of oral prednisone forty mg per day to reduce inflammation due to your asthma flare for the cough you can take guifenacin with dex with dextromethorphan as needed check your blood glucose more frequently while on prednisone as it can raise your sugar levels if your oxygen drops below 92 or your breathing worsens go to the emergency rest stay hydrated and avoid exertion use a humidifier at night and avoid cold air i want to see you back in three to five days to recheck your lungs and sugar control if symptoms worsen sooner come in immediately okay that makes sense will these make me sleepy the cough syrup might so take it at night and remember don't drive after taking it let me print your ex prescription and set your follow-up"
+
+            Example CLINICAL INTERVIEW REPORT:
+           
+            CLINICAL INTERVIEW:
+            PRESENTING PROBLEM(s)
+            - Cough, shortness of breath, chest tightness, low-grade fever for 6 days
+            - Yellowish-green sputum production
+            - Symptoms worse at night
+            - Wheezing and chest heaviness, no sharp pain
+            - Symptoms worsening with fatigue upon minimal exertion
+
+            HISTORY OF PRESENTING PROBLEM(S)
+            - Symptoms began 6 days ago
+            - Initially thought to be a cold but progressively worsening
+            - Son had severe cold last week, possible source of infection
+
+            CURRENT FUNCTIONING
+            - Sleep: Difficulty breathing especially at night
+            - Employment/Education: Fatigue with minimal exertion, gets tired walking a few steps
+
+            CURRENT MEDICATIONS
+            - Current Medications: Metformin 500mg twice daily for Type 2 diabetes
+            - Albuterol inhaler used 1-2 times weekly for asthma
+
+            MEDICAL HISTORY
+            - Personal and Family Medical History: 
+            - Mild asthma requiring occasional albuterol inhaler use
+            - Type 2 diabetes diagnosed 3 years ago
+            - Ex-smoker, quit 10 years ago (smoked during college)
+            - No known allergies
+
+            SUBSTANCE USE
+            - Substance Use: Ex-smoker, quit 10 years ago
+
+            DIAGNOSIS:
+            - Diagnosis: Acute bronchitis with asthma exacerbation
+
+            CLINICAL FORMULATION:
+            - Presenting Problem: 
+            - Acute bronchitis complicated by underlying asthma and diabetes
+            - Respiratory symptoms including cough, shortness of breath, wheezing
+            - Low-grade fever and yellowish-green sputum production
+
+            - Precipitating Factors: 
+            - Recent exposure to son with severe cold
+
+            - Perpetuating Factors: 
+            - Underlying asthma condition
+            - Type 2 diabetes
+
+            - Protecting Factors: 
+            - No current smoking (quit 10 years ago)
+            - Regular use of asthma medication
+
+            Case formulation: 
+            Client presents with acute bronchitis with asthma exacerbation, which appears to be precipitated by exposure to son with severe cold. Factors that seem to have predisposed the client to the respiratory infection include underlying mild asthma and type 2 diabetes. The current problem is maintained by the inflammatory response in the airways exacerbated by the client's asthma condition. However, the protective and positive factors include cessation of smoking 10 years ago and regular use of asthma medication.
+            """
+       
         # Continue with other template types
         elif template_type == "psychology_session_notes":
             system_message = f"""You are a clinical psychologist documentation expert specializing in professional session notes.
@@ -3377,7 +3839,91 @@ Format your response as a valid JSON object according to the clinical report sch
         - Be DIRECT and CONCISE in all documentation while preserving clinical accuracy
         - Always use "Client" instead of "Patient" throughout
         """
-             
+        elif template_type == "h75":
+            current_date = None
+            if "metadata" in transcription and "current_date" in transcription["metadata"]:
+                current_date = transcription["metadata"]["current_date"]
+                main_logger.info(f"[OP-{operation_id}] Using current_date from metadata: {current_date}")
+            system_message = f"""You are an expert medical report generator tasked with creating a concise ">75 Health Assessment" report for patients aged 75 and older. The report must follow the provided template structure, including only sections and subsections where relevant data is available from the transcription. Omit any section or subsection with no data, without using placeholders. 
+            Use a professional, empathetic, and doctor-like tone suitable for healthcare documentation. 
+            Summarize and analyze the transcription to extract pertinent information, ensuring the report is clear, concise, and uses medical terminology. Include time-related information (e.g., symptom duration, follow-up dates) where applicable. Output a valid JSON object with a 'formatted_report' field containing markdown-formatted content for clarity. Ensure the report is titled '>75 Health Assessment for [Patient Name]' and dated with the provided current_date or '[Date]' if unavailable. Structure the report to assist clinicians by providing a focused summary of the patient's condition from a doctor's perspective.
+            {preservation_instructions} {grammar_instructions} {date_instructions}
+            """
+
+            user_instructions = f"""
+        Generate a ">75 Health Assessment" report based on the provided transcription and the following template. 
+        Don't add anything that is not part of the conversation. Only surround the report around the stuff talked about in conversation.
+        Do not repeat anything
+        Extract and summarize relevant data from the transcription, including only sections and subsections with available information. Omit any section or subsection without data, avoiding placeholders. Use medical terminology, maintain a professional tone, and ensure the report is concise and structured to support clinical decision-making. Include time-related details (e.g., symptom onset, follow-up appointments) where relevant. Format the output as a valid JSON object with a 'formatted_report' field in markdown, following the template structure below:
+
+        Template Structure
+        Medical History 
+        - Chronic conditions: [e.g., List diagnosed conditions and management]  
+        - Smoking history: [e.g., Smoking status and history]  
+        - Current presentation: [e.g., Symptoms, vitals, exam findings, diagnosis]  
+        - Medications prescribed: [e.g., List medications and instructions]  
+        - Last specialist, dental, optometry visits recorded: [e.g., Cardiologist - [Date]]  
+        - Latest screening tests noted (BMD, FOBT, CST, mammogram): [e.g., BMD - [Date]]  
+        - Vaccination status updated (flu, COVID-19, pneumococcal, shingles, tetanus): [e.g., Flu - [Date]]  
+        - Sleep quality affected by snoring or daytime somnolence: [e.g., Reports snoring]  
+        - Vision: [e.g., Corrected vision with glasses]  
+        - Presence of urinary and/or bowel incontinence: [e.g., No incontinence reported]  
+        - Falls reported in last 3 months: [e.g., No falls reported]  
+        - Independent with activities of daily living: [e.g., Independent with all ADLs]  
+        - Mobility limits documented: [e.g., Difficulty with stairs]  
+        - Home support and ACAT assessment status confirmed: [e.g., No home support required]  
+        - Advance care planning documents (Will, EPoA, AHD) up to date: [e.g., Will updated [Date]]  
+        - Cognitive function assessed: [e.g., MMSE score 28/30]  
+
+        Social History
+        - Engagement in hobbies and social activities: [e.g., Enjoys gardening]  
+        - Living arrangements and availability of social supports: [e.g., Lives with family]  
+        - Caregiver roles identified: [e.g., Daughter assists with shopping]  
+
+        Sleep 
+        - Sleep difficulties or use of sleep aids documented: [e.g., Difficulty falling asleep]  
+
+        Bowel and Bladder Function 
+        - Continence status described: [e.g., Fully continent]  
+
+        Hearing and Vision 
+        - Hearing aid use and comfort noted: [e.g., Uses hearing aids bilaterally]  
+        - Recent audiology appointment recorded: [e.g., Audiology review - [Date]]  
+        - Glasses use and last optometry review noted: [e.g., Wears glasses, last review - [Date]]  
+
+        Home Environment & Safety 
+        - Home access and safety features documented: [e.g., Handrails installed]  
+        - Assistance with cleaning, cooking, gardening reported: [e.g., Hires cleaner biweekly]  
+        - Financial ability to afford food and services addressed: [e.g., Adequate resources]  
+
+        Mobility and Physical Function
+        - Ability to bend, kneel, climb stairs, dress, bathe independently: [e.g., Independent with dressing]  
+        - Use of walking aids and quality footwear: [e.g., Uses cane outdoors]  
+        - Exercise or physical activity levels described: [e.g., Walks 30 minutes daily]  
+
+        Nutrition
+        - Breakfast: [e.g., Oatmeal with fruit]  
+        - Lunch: [e.g., Salad with chicken]  
+        - Dinner: [e.g., Grilled fish, vegetables]  
+        - Snacks: [e.g., Yogurt, nuts]  
+        - Dental or swallowing difficulties: [e.g., No dental issues]  
+
+        Transport
+        - Use of transport services or family support for appointments: [e.g., Drives own car]  
+
+        Specialist and Allied Health Visits
+        - Next specialist and allied health appointments planned: [e.g., Cardiologist - [Date]]  
+
+        Health Promotion & Planning
+        - Chronic disease prevention and lifestyle advice provided: [e.g., Advised heart-healthy diet]  
+        - Immunisations and screenings reviewed and updated: [e.g., Flu vaccine scheduled]  
+        - Patient health goals and advance care planning discussed: [e.g., Goal to maintain mobility]  
+        - Referrals made as needed (allied health, social support, dental, optometry, audiology): [e.g., Referred to podiatrist]  
+        - Follow-up and recall appointments scheduled: [e.g., Follow-up in 3 months]  
+
+        Output Format
+        The output must be a valid JSON object with fields for 'title', 'date', relevant template sections (e.g., 'Medical History', 'Social History'), and 'formatted_report' containing the markdown-formatted report. Only include sections and subsections with data extracted from the transcription. Use '[Patient Name]' for the patient’s name and the provided current_date or '[Date]' if unavailable.
+        """ 
         elif template_type == "new_soap_note":
             current_date = None
             if "metadata" in transcription and "current_date" in transcription["metadata"]:
@@ -3414,7 +3960,7 @@ Format your response as a valid JSON object according to the clinical report sch
                     "This morning," "today," or similar terms refer to the reference date.
                     "X days ago" refers to the reference date minus X days (e.g., "five days ago" is reference date minus 5 days).
                     "Last week" refers to approximately 7 days prior, adjusting for specific days if mentioned (e.g., "last Wednesday" is the most recent Wednesday before the reference date).
-                Format all dates as MM/DD/YYYY (e.g., 06/10/2025) in the SOAP note output.
+                Format all dates as DD/MM/YYYY (e.g., 10/06/2025) in the SOAP note output.
                 Do not use hardcoded dates or assumed years unless explicitly stated in the transcription.
                 Verify date calculations to prevent errors, such as incorrect years or misaligned days.
             {preservation_instructions} {grammar_instructions}
@@ -3715,7 +4261,7 @@ Format your response as a valid JSON object according to the clinical report sch
             Below is the transcript:\n\n{conversation_text}
 
             """
-            system_message = f"""You are a medical documentation assistant tasked with generating a clinical report in JSON format based solely on provided transcript, contextual notes, or clinical notes. The output must be a valid JSON object with the keys: "subjective", "past_medical_history", "objective", and "assessment_and_plan". 
+            system_message = f"""You are a medical documentation assistant tasked with generating a soap issue report in JSON format based solely on provided transcript, contextual notes, or clinical notes. The output must be a valid JSON object with the keys: "subjective", "past_medical_history", "objective", and "assessment_and_plan". 
             
             Date Handling Instructions:
                 Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
@@ -3723,7 +4269,7 @@ Format your response as a valid JSON object according to the clinical report sch
                     "This morning," "today," or similar terms refer to the reference date.
                     "X days ago" refers to the reference date minus X days (e.g., "five days ago" is reference date minus 5 days).
                     "Last week" refers to approximately 7 days prior, adjusting for specific days if mentioned (e.g., "last Wednesday" is the most recent Wednesday before the reference date).
-                Format all dates as MM/DD/YYYY (e.g., 06/10/2025) in the SOAP note output.
+                Format all dates as DD/MM/YYYY (e.g., 10/06/2025) in the SOAP ISSUE note output.
                 Do not use hardcoded dates or assumed years unless explicitly stated in the transcription.
                 Verify date calculations to prevent errors, such as incorrect years or misaligned days.
             
@@ -4004,7 +4550,7 @@ Format your response as a valid JSON object according to the clinical report sch
                     "This morning," "today," or similar terms refer to the reference date.
                     "X days ago" refers to the reference date minus X days (e.g., "five days ago" is reference date minus 5 days).
                     "Last week" refers to approximately 7 days prior, adjusting for specific days if mentioned (e.g., "last Wednesday" is the most recent Wednesday before the reference date).
-                Format all dates as MM/DD/YYYY (e.g., 06/10/2025) in the SOAP note output.
+                Format all dates as DD/MM/YYYY (e.g., 10/06/2025) in the CARDIOLOGY LETTER output.
                 Do not use hardcoded dates or assumed years unless explicitly stated in the transcription.
                 Verify date calculations to prevent errors, such as incorrect years or misaligned days.
             {preservation_instructions} {grammar_instructions}
@@ -4124,7 +4670,7 @@ Format your response as a valid JSON object according to the clinical report sch
             model="gpt-4.1",
             messages=[
                 {"role": "system", "content": system_message},
-                {"role": "user", "content": user_instructions if template_type == "new_soap_note" or template_type == "cardiology_letter" or template_type == "detailed_soap_note" or template_type == "soap_issues" or template_type == "consult_note" or template_type == "referral_letter" else f"Here is a medical conversation. Please format it into a structured {template_type}. YOUR RESPONSE MUST BE VALID JSON:\n\n{conversation_text}"}
+                {"role": "user", "content": user_instructions if template_type =="h75" or template_type == "new_soap_note" or template_type =="mental_health_appointment" or template_type =="clinical_report" or template_type == "cardiology_letter" or template_type == "detailed_soap_note" or template_type == "soap_issues" or template_type == "consult_note" or template_type == "referral_letter" else f"Here is a medical conversation. Please format it into a structured {template_type}. YOUR RESPONSE MUST BE VALID JSON:\n\n{conversation_text}"}
             ],
             temperature=0.3, # Lower temperature for more consistent outputs
             response_format={"type": "json_object"}
@@ -4178,6 +4724,8 @@ async def format_report(gpt_response, template_type):
             return await format_soap_note(data)
         elif template_type == "new_soap_note":
             return await format_new_soap(data)
+        elif template_type == "h75":
+            return await format_h75(data)
         elif template_type == "soap_issues":
             return await format_soap_issues(data)
         elif template_type == "progress_note":
@@ -5016,50 +5564,110 @@ async def test_dynamodb():
 
 async def format_clinical_report(gpt_response):
     """
-    Format a clinical report from GPT structured response based on CLINICAL_REPORT_SCHEMA.
+    Formats the GPT response into a structured markdown report, keeping main headings fixed
+    and dynamically handling subheadings, excluding empty sections.
     
     Args:
-        gpt_response: Dictionary containing the structured clinical report data
-        
+        gpt_response (dict): The GPT response dictionary containing medical data.
+    
     Returns:
-        Formatted string containing the human-readable clinical report
+        str: A formatted markdown string or an error message if formatting fails.
     """
     try:
-        report = []
+        formatted_report = ["# Medical Report\n"]
         
-        # Add heading
-        report.append("# CLINICAL REPORT\n")
-        
-        # Define sections with their corresponding titles
-        sections = {
-            "presenting_problems": "## Presenting Problems",
-            "history_of_problems": "## History of Problems",
-            "current_functioning": "## Current Functioning",
-            "current_medications": "## Current Medications",
-            "psychiatric_history": "## Psychiatric History",
-            "medical_history": "## Medical History",
-            "developmental_social_family_history": "## Developmental, Social, and Family History",
-            "substance_use": "## Substance Use",
-            "cultural_religious_spiritual_issues": "## Cultural, Religious, and Spiritual Issues",
-            "risk_assessment": "## Risk Assessment",
-            "mental_state_exam": "## Mental State Examination",
-            "test_results": "## Test Results",
-            "diagnosis": "## Diagnosis",
-            "clinical_formulation": "## Clinical Formulation"
+        # Dictionary to map main headings to their keys and display names
+        main_headings = {
+            "presenting_problems": "Presenting Problems",
+            "history_of_presenting_problems": "History of Presenting Problems",
+            "current_functioning": "Current Functioning",
+            "current_medications": "Current Medications",
+            "psychiatric_history": "Psychiatric History",
+            "medical_history": "Medical History",
+            "developmental_social_family_history": "Developmental, Social, and Family History",
+            "substance_use": "Substance Use",
+            "relevant_cultural_religious_spiritual_issues": "Cultural, Religious, and Spiritual Issues",
+            "risk_assessment": "Risk Assessment",
+            "mental_state_exam": "Mental State Exam",
+            "test_results": "Test Results",
+            "diagnosis": "Diagnosis",
+            "clinical_formulation": "Clinical Formulation",
+            "additional_notes": "Additional Notes"
         }
         
-        # Iterate over each section and add to the report if not "Not discussed"
-        for key, title in sections.items():
-            value = gpt_response.get(key)
-            if value and value != "Not discussed":
-                report.append(f"{title}")
-                report.append(value)
-                report.append("")  # Add a newline for spacing
+        for key, display_name in main_headings.items():
+            if not gpt_response.get(key):  # Skip if section is empty or missing
+                continue
+                
+            formatted_report.append(f"## {display_name}")
+            
+            data = gpt_response[key]
+            
+            if key == "presenting_problems":
+                for item in data:
+                    if item.get("details"):
+                        formatted_report.extend(item["details"])
+                        formatted_report.append("")  # Add spacing
+                        
+            elif key == "history_of_presenting_problems":
+                for issue in data:
+                    issue_name = issue.get("issue_name", "Issue")
+                    formatted_report.append(f"### {issue_name}")
+                    if issue.get("details"):
+                        formatted_report.extend(issue["details"])
+                        formatted_report.append("")  # Add spacing
+                        
+            elif key == "current_functioning":
+                for subkey, sub_data in data.items():
+                    if sub_data:  # Only include non-empty subheadings
+                        formatted_report.append(f"### {subkey.replace('_', ' ').title()}")
+                        formatted_report.extend(sub_data)
+                        formatted_report.append("")  # Add spacing
+                        
+            elif key in ["current_medications", "psychiatric_history", "substance_use", 
+                         "relevant_cultural_religious_spiritual_issues", "risk_assessment", 
+                         "mental_state_exam", "test_results", "diagnosis", "additional_notes"]:
+                if isinstance(data, list):
+                    formatted_report.extend(data)
+                    formatted_report.append("")  # Add spacing
+                else:
+                    for subkey, sub_data in data.items():
+                        if isinstance(sub_data, list) and sub_data:  # Only include non-empty subheadings
+                            formatted_report.append(f"### {subkey.replace('_', ' ').title()}")
+                            formatted_report.extend(sub_data)
+                            formatted_report.append("")  # Add spacing
+            
+            elif key == "clinical_formulation":
+                for subkey, sub_data in data.items():
+                    if sub_data:  # Only include non-empty subheadings
+                        if subkey == "case_formulation":
+                            formatted_report.append(f"### Case Formulation\n{sub_data}")
+                        else:
+                            formatted_report.append(f"### {subkey.replace('_', ' ').title()}")
+                            formatted_report.extend(sub_data)
+                        formatted_report.append("")  # Add spacing
+            
+            else:
+                # Generic handling for other main headings (like medical_history, etc.)
+                if isinstance(data, list):
+                    formatted_report.extend(data)
+                    formatted_report.append("")  # Add spacing
+                else:
+                    for subkey, sub_data in data.items():
+                        if sub_data:  # Only include non-empty subheadings
+                            formatted_report.append(f"### {subkey.replace('_', ' ').title()}")
+                            formatted_report.extend(sub_data)
+                            formatted_report.append("")  # Add spacing
         
-        return "\n".join(report)
+        # If only the heading exists, add a default message
+        if len(formatted_report) == 1:
+            formatted_report.append("No findings documented")
+        
+        return "\n".join(formatted_report).rstrip()  # Remove trailing newline
+    
     except Exception as e:
-        error_logger.error(f"Error formatting clinical report: {str(e)}", exc_info=True)
-        return f"Error formatting clinical report: {str(e)}"
+        error_logger.error(f"Error formatting medical report: {str(e)}", exc_info=True)
+        return f"Error formatting medical report: {str(e)}"
 
 async def format_soap_note(gpt_response):
     """
@@ -5151,6 +5759,7 @@ async def format_soap_note(gpt_response):
     except Exception as e:
         error_logger.error(f"Error formatting SOAP note: {str(e)}", exc_info=True)
         return f"Error formatting SOAP note: {str(e)}"
+
 def format_ap_section(ap_data):
     """
     Unfolds an A/P dictionary into a plain-text format without hardcoding key names.
@@ -5193,6 +5802,13 @@ def format_ap_section(ap_data):
 
     return output
 
+
+async def format_h75(gpt_response):
+    formatted_report = gpt_response.get("formatted_report")
+    if formatted_report:
+        return formatted_report
+    else:
+        return "No formatted report available."
 async def format_new_soap(gpt_response):
     """
     Format a new SOAP note from GPT structured response.
@@ -5596,7 +6212,7 @@ async def format_progress_note(data):
 
 async def format_mental_health_note(gpt_response):
     """
-    Format a mental health note from GPT structured response based on MENTAL_HEALTH_NOTE_SCHEMA.
+    Format a mental health note from a structured GPT response.
     
     Args:
         gpt_response: Dictionary containing the structured mental health note data
@@ -5605,54 +6221,80 @@ async def format_mental_health_note(gpt_response):
         Formatted string containing the human-readable mental health note
     """
     try:
-        report = []
+        note = []
         
         # Add heading
-        report.append("# MENTAL HEALTH APPOINTMENT NOTE\n")
+        note.append("# MENTAL HEALTH NOTE\n")
         
-        # Define sections with their corresponding titles
-        sections = {
-            "patient_details": "## Patient Details",
-            "reason_for_visit": "## Reason for Visit",
-            "presenting_issue": "## Presenting Issue",
-            "past_psychiatric_history": "## Past Psychiatric History",
-            "current_medications": "## Current Medications",
-            "mental_status": "## Mental Status",
-            "assessment": "## Assessment",
-            "treatment_plan": "## Treatment Plan",
-            "safety_assessment": "## Safety Assessment",
-            "support": "## Support",
-            "next_steps": "## Next Steps",
-            "provider": "## Provider"
-        }
+        # CHIEF COMPLAINT
+        if gpt_response.get("Chief Complaint"):
+            note.append("## CHIEF COMPLAINT")
+            for item in gpt_response["Chief Complaint"]:
+                note.append(item)
+            note.append("")
         
-        # Define patient fields if needed
-        patient_fields = [
-            ("name", "Name"),
-            ("age", "Age"),
-            ("gender", "Gender"),
-            ("dob", "Date of Birth")
-        ]
+        # PAST MEDICAL & PSYCHIATRIC HISTORY
+        if gpt_response.get("Past medical & psychiatric history"):
+            note.append("## PAST MEDICAL & PSYCHIATRIC HISTORY")
+            for item in gpt_response["Past medical & psychiatric history"]:
+                note.append(item)
+            note.append("")
         
-        # Iterate over each section and add to the report if not "Not discussed"
-        for key, title in sections.items():
-            value = gpt_response.get(key)
-            if isinstance(value, dict):
-                # For nested dictionaries, check if all values are "Not discussed"
-                if all(v == "Not discussed" for v in value.values()):
-                    continue
-                # Otherwise, format the nested dictionary
-                report.append(f"{title}")
-                for sub_key, sub_value in value.items():
-                    if sub_value != "Not discussed":
-                        report.append(f"{sub_key.replace('_', ' ').title()}: {sub_value}")
-            elif value and value != "Not discussed":
-                report.append(f"{title}")
-                report.append(value)
-            
-            report.append("")  # Add a newline for spacing
+        # FAMILY HISTORY
+        if gpt_response.get("Family History"):
+            note.append("## FAMILY HISTORY")
+            for item in gpt_response["Family History"]:
+                note.append(item)
+            note.append("")
         
-        return "\n".join(report)
+        # SOCIAL HISTORY
+        if gpt_response.get("Social History"):
+            note.append("## SOCIAL HISTORY")
+            seen = set()
+            for item in gpt_response["Social History"]:
+                item_text = item[2:].strip()  # Remove "- " prefix for comparison
+                if item_text not in seen:
+                    seen.add(item_text)
+                    note.append(item)
+            note.append("")
+        
+        # MENTAL STATUS EXAMINATION
+        if gpt_response.get("Mental Status Examination"):
+            note.append("## MENTAL STATUS EXAMINATION")
+            for item in gpt_response["Mental Status Examination"]:
+                if item[2:].strip() != "No findings reported":  # Skip placeholder text
+                    note.append(item)
+            note.append("")
+        
+        # RISK ASSESSMENT
+        if gpt_response.get("Risk Assessment"):
+            note.append("## RISK ASSESSMENT")
+            for item in gpt_response["Risk Assessment"]:
+                note.append(item)
+            note.append("")
+        
+        # DIAGNOSIS
+        if gpt_response.get("Diagnosis"):
+            note.append("## DIAGNOSIS")
+            for item in gpt_response["Diagnosis"]:
+                note.append(item)
+            note.append("")
+        
+        # TREATMENT PLAN
+        if gpt_response.get("Treatment Plan"):
+            note.append("## TREATMENT PLAN")
+            for item in gpt_response["Treatment Plan"]:
+                note.append(item[2:].strip())  # Remove "- " for plain text
+            note.append("")
+        
+        # SAFETY PLAN
+        if gpt_response.get("Safety Plan"):
+            note.append("## SAFETY PLAN")
+            for item in gpt_response["Safety Plan"]:
+                note.append(item[2:].strip())  # Remove "- " for plain text
+            note.append("")
+        
+        return "\n".join(note)
     except Exception as e:
         error_logger.error(f"Error formatting mental health note: {str(e)}", exc_info=True)
         return f"Error formatting mental health note: {str(e)}"
@@ -6774,83 +7416,93 @@ async def format_dietician_assessment(gpt_response):
 
 async def format_consult_note(gpt_response):
     """
-    Format a consultation note from GPT structured response based on the specified consult note template.
+    Formats the GPT response into a structured markdown report, keeping main headings fixed
+    and dynamically handling subheadings, excluding empty sections.
     
     Args:
-        gpt_response: Dictionary containing the structured consultation note data
-        
+        gpt_response (dict): The GPT response dictionary containing medical data.
+    
     Returns:
-        Formatted string containing the human-readable consultation note
+        str: A formatted markdown string.
     """
-    try:
-        report = []
+    formatted_report = "# Medical Report\n\n"
+    
+    # Dictionary to map main headings to their keys and display names
+    main_headings = {
+        "presenting_problems": "Presenting Problems",
+        "history_of_presenting_problems": "History of Presenting Problems",
+        "current_functioning": "Current Functioning",
+        "current_medications": "Current Medications",
+        "psychiatric_history": "Psychiatric History",
+        "medical_history": "Medical History",
+        "developmental_social_family_history": "Developmental, Social, and Family History",
+        "substance_use": "Substance Use",
+        "relevant_cultural_religious_spiritual_issues": "Cultural, Religious, and Spiritual Issues",
+        "risk_assessment": "Risk Assessment",
+        "mental_state_exam": "Mental State Exam",
+        "test_results": "Test Results",
+        "diagnosis": "Diagnosis",
+        "clinical_formulation": "Clinical Formulation",
+        "additional_notes": "Additional Notes"
+    }
+    
+    for key, display_name in main_headings.items():
+        if not gpt_response.get(key):  # Skip if section is empty or missing
+            continue
+            
+        formatted_report += f"## {display_name}\n"
         
-        # Add heading
-        report.append("# CONSULTATION NOTE\n")
+        data = gpt_response[key]
         
-        # Consultation Type
-        consultation_type = gpt_response.get("Consultation Type", [])
-        if consultation_type and consultation_type != "Not documented" and consultation_type != []:
-            report.append("## Consultation Type:")
-            report.extend([f"- {item.lstrip('- ')}" for item in consultation_type])
-            report.append("")
+        if key == "presenting_problems":
+            for item in data:
+                if item.get("details"):
+                    formatted_report += "\n".join(item["details"]) + "\n\n"
+                    
+        elif key == "history_of_presenting_problems":
+            for issue in data:
+                issue_name = issue.get("issue_name", "Issue")
+                formatted_report += f"### {issue_name}\n"
+                if issue.get("details"):
+                    formatted_report += "\n".join(issue["details"]) + "\n\n"
+                    
+        elif key == "current_functioning":
+            for subkey, sub_data in data.items():
+                if sub_data:  # Only include non-empty subheadings
+                    formatted_report += f"### {subkey.replace('_', ' ').title()}\n"
+                    formatted_report += "\n".join(sub_data) + "\n\n"
+                    
+        elif key in ["current_medications", "psychiatric_history", "substance_use", 
+                     "relevant_cultural_religious_spiritual_issues", "risk_assessment", 
+                     "mental_state_exam", "test_results", "diagnosis", "additional_notes"]:
+            if isinstance(data, list):
+                formatted_report += "\n".join(data) + "\n\n"
+            else:
+                for subkey, sub_data in data.items():
+                    if isinstance(sub_data, list) and sub_data:  # Only include non-empty subheadings with data
+                        formatted_report += f"### {subkey.replace('_', ' ').title()}\n"
+                        formatted_report += "\n".join(sub_data) + "\n\n"
         
-        # History Section
-        history = gpt_response.get("History", {})
-        if history:
-            report.append("## History:")
-            history_fields = [
-                ("History of Presenting Complaints", lambda x: [f"- {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- {x.lstrip('- ')}"]),
-                ("ICE", lambda x: [f"- ICE: {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- ICE: {x.lstrip('- ')}"]),
-                ("Red Flag Symptoms", lambda x: [f"- {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- {x.lstrip('- ')}"]),
-                ("Relevant Risk Factors", lambda x: [f"- Relevant risk factors: {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- Relevant risk factors: {x.lstrip('- ')}"]),
-                ("PMH/PSH", lambda x: [f"- PMH: {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- PMH: {x.lstrip('- ')}"]),
-                ("DH/Allergies", lambda x: [f"- DH: {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- DH: {x.lstrip('- ')}"]),
-                ("FH", lambda x: [f"- FH: {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- FH: {x.lstrip('- ')}"]),
-                ("SH", lambda x: [f"- SH: {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- SH: {x.lstrip('- ')}"])
-            ]
-            for field, formatter in history_fields:
-                if field in history and history[field] and history[field] != "Not documented" and history[field] != "":
-                    report.extend(formatter(history[field]))
-            report.append("")
+        elif key == "clinical_formulation":
+            for subkey, sub_data in data.items():
+                if sub_data:  # Only include non-empty subheadings
+                    if subkey == "case_formulation":
+                        formatted_report += f"### Case Formulation\n{sub_data}\n\n"
+                    else:
+                        formatted_report += f"### {subkey.replace('_', ' ').title()}\n"
+                        formatted_report += "\n".join(sub_data) + "\n\n"
         
-        # Examination Section
-        examination = gpt_response.get("Examination", {})
-        if examination:
-            report.append("## Examination:")
-            exam_fields = [
-                ("Vital Signs", lambda x: [f"- {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- {x.lstrip('- ')}"]),
-                ("Physical/Mental State Examination Findings", lambda x: [f"- {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- {x.lstrip('- ')}"]),
-                ("Investigations with Results", lambda x: [f"- {item.lstrip('- ')}" for item in x] if isinstance(x, list) else [f"- {x.lstrip('- ')}"])
-            ]
-            for field, formatter in exam_fields:
-                if field in examination and examination[field] and examination[field] != "Not documented" and examination[field] != "":
-                    report.extend(formatter(examination[field]))
-            report.append("")
-        
-        # Impression Section
-        impression = gpt_response.get("Impression", [])
-        if impression and impression != "Not documented" and impression != []:
-            report.append("## Impression:")
-            for i, item in enumerate(impression, 1):
-                if isinstance(item, str) and item != "Not documented" and item != "":
-                    report.append(f"{i}. {item}")
-            report.append("")
-        
-        # Plan Section
-        plan = gpt_response.get("Plan", {})
-        if plan:
-            report.append("## Plan:")
-            for issue, actions in plan.items():
-                report.append(f"### {issue}:")
-                for action in actions:
-                    report.append(f"- {action.lstrip('- ')}")
-            report.append("")
-        
-        return "\n".join(report)
-    except Exception as e:
-        error_logger.error(f"Error formatting consultation note: {str(e)}", exc_info=True)
-        return f"Error formatting consultation note: {str(e)}"
+        else:
+            # Generic handling for other main headings (like medical_history, etc.)
+            if isinstance(data, list):
+                formatted_report += "\n".join(data) + "\n\n"
+            else:
+                for subkey, sub_data in data.items():
+                    if sub_data:  # Only include non-empty subheadings
+                        formatted_report += f"### {subkey.replace('_', ' ').title()}\n"
+                        formatted_report += "\n".join(sub_data) + "\n\n"
+    
+    return formatted_report
 
 async def format_referral_letter(gpt_response):
     """
@@ -7910,7 +8562,7 @@ async def transcribe_and_generate_report(
                 }, status_code=400)
 
         # Validate template type
-        valid_templates = ["clinical_report","new_soap_note","soap_issues", "detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes","pathology_note", "consult_note","discharge_summary","case_formulation"]
+        valid_templates = ["clinical_report","h75","new_soap_note","soap_issues", "detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes","pathology_note", "consult_note","discharge_summary","case_formulation"]
         
         if template_type not in valid_templates:
             error_msg = f"Invalid template type '{template_type}'. Must be one of: {', '.join(valid_templates)}"
@@ -8161,3 +8813,381 @@ async def update_report(report_id: str, formatted_report: str = Form(...)):
         error_msg = f"Failed to update report: {str(e)}"
         error_logger.error(error_msg, exc_info=True)
         return JSONResponse({"error": error_msg}, status_code=500)
+
+# ... (Previous code remains unchanged up to the WebSocket endpoint definition)
+
+@app.websocket("/ws/transcribe-and-generate-report")
+@log_execution_time
+async def ws_transcribe_and_generate_report(websocket: WebSocket):
+    """
+    WebSocket endpoint to transcribe audio and generate a report with step-by-step updates.
+    
+    The client must send a JSON message with the following structure:
+    {
+        "template_type": str,  # e.g., "new_soap_note"
+        "audio_data": str,    # Base64-encoded audio data
+        "filename": str,      # Name of the audio file (e.g., "audio.wav")
+        "content_type": str   # MIME type (e.g., "audio/wav")
+    }
+    
+    The server sends JSON updates at each processing step:
+    - Audio received
+    - Audio validation completed
+    - Audio saved to S3
+    - Transcription started/completed
+    - Report generation started/completed
+    - Error messages if any step fails
+    """
+    client_id = str(uuid.uuid4())
+    request_id = client_id[:8]
+    main_logger.info(f"[REQ-{request_id}] WebSocket connection established for client {client_id}")
+
+    try:
+        # Connect WebSocket
+        await manager.connect(websocket, client_id)
+        
+        # Receive initial message with audio data and parameters
+        data = await websocket.receive_json()
+        main_logger.info(f"[REQ-{request_id}] Received initial message: {data.keys()}")
+
+        # Extract parameters
+        template_type = data.get("template_type", "new_soap_note")
+        audio_b64 = data.get("audio_data")
+        filename = data.get("filename", "audio.wav")
+        content_type = data.get("content_type", "audio/wav")
+
+        # Send audio received update
+        await manager.send_message(json.dumps({
+            "status": "processing",
+            "step": "audio_received",
+            "data": {
+                "filename": filename,
+                "content_type": content_type,
+                "template_type": template_type
+            }
+        }), client_id)
+
+        # Validate template type
+        valid_templates = ["clinical_report","h75", "new_soap_note", "soap_issues", "detailed_soap_note", "soap_note", 
+                          "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", 
+                          "meeting_minutes", "referral_letter", "detailed_dietician_initial_assessment", 
+                          "psychology_session_notes", "pathology_note", "consult_note", "discharge_summary", 
+                          "case_formulation"]
+        if template_type not in valid_templates:
+            error_msg = f"Invalid template type '{template_type}'. Must be one of: {', '.join(valid_templates)}"
+            error_logger.error(f"[REQ-{request_id}] {error_msg}")
+            await manager.send_message(json.dumps({
+                "status": "failed",
+                "step": "validation",
+                "error": error_msg,
+                "transcription_status": "failed",
+                "report_status": "not_started"
+            }), client_id)
+            return
+
+        # Validate content type
+        valid_content_types = [
+            "audio/wav", "audio/wave", "audio/x-wav",
+            "audio/mp3", "audio/mpeg", "audio/mpeg3", "audio/x-mpeg-3",
+            "audio/mp4", "audio/x-m4a", "audio/m4a",
+            "audio/flac", "audio/x-flac",
+            "audio/aac", "audio/x-aac",
+            "audio/ogg", "audio/vorbis", "application/ogg",
+            "audio/webm",
+            "audio/3gpp", "audio/amr"
+        ]
+        valid_extensions = [".wav", ".mp3", ".mp4", ".m4a", ".flac", ".aac", ".ogg", ".webm", ".amr", ".3gp"]
+        file_extension = os.path.splitext(filename.lower())[1]
+
+        if content_type not in valid_content_types:
+            if file_extension in valid_extensions:
+                main_logger.info(f"[REQ-{request_id}] Content-type not recognized ({content_type}), but filename has valid extension: {file_extension}")
+            else:
+                error_msg = f"Invalid audio format. Expected audio file, got {content_type}"
+                error_logger.error(f"[REQ-{request_id}] {error_msg}")
+                await manager.send_message(json.dumps({
+                    "status": "failed",
+                    "step": "validation",
+                    "error": error_msg,
+                    "transcription_status": "failed",
+                    "report_status": "not_started"
+                }), client_id)
+                return
+
+        # Decode base64 audio data
+        try:
+            audio_data = base64.b64decode(audio_b64)
+        except Exception as e:
+            error_msg = f"Invalid base64 audio data: {str(e)}"
+            error_logger.error(f"[REQ-{request_id}] {error_msg}")
+            await manager.send_message(json.dumps({
+                "status": "failed",
+                "step": "validation",
+                "error": error_msg,
+                "transcription_status": "failed",
+                "report_status": "not_started"
+            }), client_id)
+            return
+
+        if not audio_data:
+            error_msg = "No audio data provided"
+            error_logger.error(f"[REQ-{request_id}] {error_msg}")
+            await manager.send_message(json.dumps({
+                "status": "failed",
+                "step": "validation",
+                "error": error_msg,
+                "transcription_status": "failed",
+                "report_status": "not_started"
+            }), client_id)
+            return
+
+        main_logger.info(f"[REQ-{request_id}] Audio data decoded successfully. Size: {len(audio_data)} bytes")
+
+        # Send validation completed update
+        await manager.send_message(json.dumps({
+            "status": "processing",
+            "step": "validation_completed",
+            "data": {
+                "filename": filename,
+                "content_type": content_type,
+                "size_bytes": len(audio_data)
+            }
+        }), client_id)
+
+        # Initialize status tracking
+        transcription_status = "processing"
+        report_status = "not_started"
+        transcript_id = str(uuid.uuid4())
+        report_id = None
+        transcription_result = None
+        gpt_response = None
+        formatted_report = None
+
+        # Save audio to S3
+        try:
+            audio_info = await save_audio_to_s3(audio_data)
+            if not audio_info:
+                error_msg = "Failed to save audio to S3"
+                error_logger.error(f"[REQ-{request_id}] {error_msg}")
+                await manager.send_message(json.dumps({
+                    "status": "failed",
+                    "step": "save_audio",
+                    "error": error_msg,
+                    "transcription_status": "failed",
+                    "report_status": "not_started"
+                }), client_id)
+                return
+            await manager.send_message(json.dumps({
+                "status": "processing",
+                "step": "audio_saved",
+                "data": audio_info
+            }), client_id)
+        except Exception as e:
+            error_msg = f"Error saving audio to S3: {str(e)}"
+            error_logger.error(f"[REQ-{request_id}] {error_msg}")
+            await manager.send_message(json.dumps({
+                "status": "failed",
+                "step": "save_audio",
+                "error": error_msg,
+                "transcription_status": "failed",
+                "report_status": "not_started"
+            }), client_id)
+            return
+
+        # Transcribe audio
+        try:
+            await manager.send_message(json.dumps({
+                "status": "processing",
+                "step": "transcription_started",
+                "data": {"transcript_id": transcript_id}
+            }), client_id)
+
+            transcription_result = await transcribe_audio_with_diarization(audio_data)
+            transcription_status = "completed"
+
+            if isinstance(transcription_result, str) and transcription_result.startswith("Error"):
+                transcription_status = "failed"
+                error_msg = transcription_result
+                error_logger.error(f"[REQ-{request_id}] {error_msg}")
+                await manager.send_message(json.dumps({
+                    "status": "failed",
+                    "step": "transcription",
+                    "error": error_msg,
+                    "transcription_status": transcription_status,
+                    "report_status": report_status,
+                    "transcript_id": transcript_id
+                }), client_id)
+                await save_transcript_to_dynamodb(
+                    {"error": error_msg},
+                    audio_info,
+                    status=transcription_status
+                )
+                return
+
+            # Save transcription to DynamoDB
+            transcript_id = await save_transcript_to_dynamodb(
+                transcription_result,
+                audio_info,
+                status=transcription_status
+            )
+            if not transcript_id:
+                error_msg = "Failed to save transcription to DynamoDB"
+                error_logger.error(f"[REQ-{request_id}] {error_msg}")
+                await manager.send_message(json.dumps({
+                    "status": "failed",
+                    "step": "transcription_save",
+                    "error": error_msg,
+                    "transcription_status": "failed",
+                    "report_status": report_status
+                }), client_id)
+                return
+
+            await manager.send_message(json.dumps({
+                "status": "processing",
+                "step": "transcription_completed",
+                "data": {
+                    "transcript_id": transcript_id,
+                    "transcription": transcription_result
+                }
+            }), client_id)
+        except Exception as e:
+            transcription_status = "failed"
+            error_msg = f"Error during transcription: {str(e)}"
+            error_logger.exception(f"[REQ-{request_id}] {error_msg}")
+            await manager.send_message(json.dumps({
+                "status": "failed",
+                "step": "transcription",
+                "error": error_msg,
+                "transcription_status": transcription_status,
+                "report_status": report_status,
+                "transcript_id": transcript_id
+            }), client_id)
+            await save_transcript_to_dynamodb(
+                {"error": error_msg},
+                audio_info,
+                status=transcription_status
+            )
+            return
+
+        # Generate report
+        try:
+            await manager.send_message(json.dumps({
+                "status": "processing",
+                "step": "report_generation_started",
+                "data": {"transcript_id": transcript_id, "template_type": template_type}
+            }), client_id)
+
+            report_status = "processing"
+            gpt_response = await generate_gpt_response(transcription_result, template_type)
+
+            if isinstance(gpt_response, str) and gpt_response.startswith("Error"):
+                report_status = "failed"
+                error_msg = gpt_response
+                error_logger.error(f"[REQ-{request_id}] {error_msg}")
+                await manager.send_message(json.dumps({
+                    "status": "failed",
+                    "step": "report_generation",
+                    "error": error_msg,
+                    "transcription_status": transcription_status,
+                    "report_status": report_status,
+                    "transcript_id": transcript_id
+                }), client_id)
+                return
+
+            formatted_report = await format_report(gpt_response, template_type)
+
+            if isinstance(formatted_report, str) and formatted_report.startswith("Error"):
+                report_status = "failed"
+                error_msg = formatted_report
+                error_logger.error(f"[REQ-{request_id}] {error_msg}")
+                await manager.send_message(json.dumps({
+                    "status": "failed",
+                    "step": "report_formatting",
+                    "error": error_msg,
+                    "transcription_status": transcription_status,
+                    "report_status": report_status,
+                    "transcript_id": transcript_id
+                }), client_id)
+                return
+
+            # Save report to DynamoDB
+            report_id = await save_report_to_dynamodb(
+                transcript_id,
+                gpt_response,
+                formatted_report,
+                template_type,
+                status="completed"
+            )
+            report_status = "completed"
+
+            if not report_id:
+                error_msg = "Failed to save report to DynamoDB"
+                error_logger.error(f"[REQ-{request_id}] {error_msg}")
+                await manager.send_message(json.dumps({
+                    "status": "failed",
+                    "step": "report_save",
+                    "error": error_msg,
+                    "transcription_status": transcription_status,
+                    "report_status": "failed",
+                    "transcript_id": transcript_id
+                }), client_id)
+                return
+
+            await manager.send_message(json.dumps({
+                "status": "success",
+                "step": "report_generation_completed",
+                "data": {
+                    "transcript_id": transcript_id,
+                    "report_id": report_id,
+                    "template_type": template_type,
+                    "transcription": transcription_result,
+                    "gpt_response": json.loads(gpt_response) if gpt_response else None,
+                    "formatted_report": formatted_report
+                },
+                "transcription_status": transcription_status,
+                "report_status": report_status
+            }), client_id)
+
+            main_logger.info(f"[REQ-{request_id}] WebSocket process completed successfully")
+        except Exception as e:
+            report_status = "failed"
+            error_msg = f"Error during report generation: {str(e)}"
+            error_logger.exception(f"[REQ-{request_id}] {error_msg}")
+            await manager.send_message(json.dumps({
+                "status": "failed",
+                "step": "report_generation",
+                "error": error_msg,
+                "transcription_status": transcription_status,
+                "report_status": report_status,
+                "transcript_id": transcript_id,
+                "report_id": report_id
+            }), client_id)
+            if transcript_id:
+                await save_report_to_dynamodb(
+                    transcript_id,
+                    gpt_response,
+                    formatted_report,
+                    template_type,
+                    status=report_status
+                )
+
+    except WebSocketDisconnect:
+        main_logger.info(f"[REQ-{request_id}] Client {client_id} disconnected")
+    except Exception as e:
+        error_msg = f"Unexpected error in WebSocket: {str(e)}"
+        error_logger.exception(f"[REQ-{request_id}] {error_msg}")
+        try:
+            await manager.send_message(json.dumps({
+                "status": "failed",
+                "step": "unexpected_error",
+                "error": error_msg,
+                "transcription_status": transcription_status,
+                "report_status": report_status,
+                "transcript_id": transcript_id,
+                "report_id": report_id
+            }), client_id)
+        except:
+            pass
+    finally:
+        manager.disconnect(client_id)
+        main_logger.info(f"[REQ-{request_id}] WebSocket connection closed for client {client_id}")
