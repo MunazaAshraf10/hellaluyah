@@ -7459,7 +7459,6 @@ async def format_consult_note(gpt_response):
                 # Handle History as a dictionary with sub-sections
                 # History of Presenting Complaints
                 if history.get("History of Presenting Complaints"):
-                    note.append("### History of Presenting Complaints")
                     for item in history["History of Presenting Complaints"]:
                         note.append(item)
                     note.append("")
