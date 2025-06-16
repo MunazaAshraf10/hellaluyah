@@ -2712,6 +2712,10 @@ By following these instructions, ensure the referral letter is accurate, profess
                 c) Investigations with Results: Completed investigations and their results, if mentioned.
             - Omit any subheading or field if no relevant information is provided.
             - Do not assume normal findings unless explicitly stated.
+            - Always include sub-headings if data available for them.
+            - Write each subheading only once and add all the information available for respective subheading under it dont dont repeat the subheadings.
+            - Never write plan without the subheading mentioned in the section if the data is available otherwise ignore that subheadings dont add it in report.
+ 
 
             Impression:
             - List each issue, problem, or request as a separate entry, formatted as:
@@ -2732,7 +2736,7 @@ By following these instructions, ensure the referral letter is accurate, profess
             - If some sentence is long split it into multiple points and write "-  " before each line.
             - Always include sub-headings if data available for them
             - Never write plan without the subheading mentioned in the section if the data is available otherwise ignore that subheadings dont add it in report.
- 
+            - Write each subheading only once and add all the information available for respective subheading under it dont dont repeat the subheadings.
             
             Constraints
             - Data Source: Use only data from the provided transcript or contextual notes. Do not invent patient details, assessments, diagnoses, differential diagnoses, plans, interventions, evaluations, or safety netting advice.
@@ -7491,6 +7495,37 @@ async def format_consult_note(gpt_response):
                 sh_items = [item[2:].strip() for item in history["SH"]]  # Remove "- " prefix
                 note.append(f"- sH: {', '.join(sh_items)}")
                 note.append("")
+
+        if gpt_response.get("Examination"):
+            note.append("## EXAMINATION")
+            exam = gpt_response["Examination"]
+            
+            if exam.get("Vital Signs"):
+                vital_items = [item[2:].strip() for item in exam["Vital Signs"]]  # Remove "- " prefix
+                note.append(f"- Vital Signs: {', '.join(vital_items)}")
+                note.append("")
+
+            # "Physical/Mental State Examination Findings
+            if exam.get("Physical/Mental State Examination Findings"):
+                for item in exam["Physical/Mental State Examination Findings"]:
+                    note.append(item)
+                note.append("")
+            
+
+            # if exam.get("Physical/Mental State Examination Findings"):
+            #     phs_items = [item[2:].strip() for item in exam["Physical/Mental State Examination Findings"]]  # Remove "- " prefix
+            #     note.append(f"- {', '.join(phs_items)}")
+            #     note.append("")
+            
+            # Investigations with Results
+            if exam.get("Investigations with Results"):
+                for item in exam["Investigations with Results"]:
+                    note.append(item)
+                note.append("")
+            # if exam.get("Investigations with Results"):
+            #     iwr_items = [item[2:].strip() for item in exam["Investigations with Results"]]  # Remove "- " prefix
+            #     note.append(f"- {', '.join(iwr_items)}")
+            #     note.append("")
 
         # IMPRESSION
         if gpt_response.get("Impression"):
