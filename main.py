@@ -2692,7 +2692,7 @@ By following these instructions, ensure the referral letter is accurate, profess
             - Include the following subheadings, using bullet points (`- `) for each item:
                 a) History of Presenting Complaints: Summarize the patient’s chief complaints, including duration, timing, location, quality, severity, or context, if mentioned.
                 b) ICE: Patient’s Ideas, Concerns, and Expectations, if mentioned.
-                c) Red Flag Symptoms: Presence or absence of red flag symptoms relevant to the presenting complaint, if mentioned.
+                c) Red Flag Symptoms: Presence or absence of red flag symptoms relevant to the presenting complaint, if mentioned. Try to accomodate all red flag in concise way in 1-2 points if they are mentioned.
                 d) Relevant Risk Factors: Risk factors relevant to the complaint, if mentioned.
                 e) PMH/PSH: Past medical or surgical history, if mentioned.
                 f) DH/Allergies: Drug history/medications and allergies, if mentioned (omit allergies if not mentioned).
@@ -4253,7 +4253,8 @@ By following these instructions, ensure the referral letter is accurate, profess
             For each point add - at the beginning of the line and give two letter space after that.
             Add time related information in the report dont miss them.
             Make sure the point are concise and structured and looks professional.
-            Use medical terms to describe each thing
+            Use medical terms to describe each thing.
+            Please do not repeat anything, the past medical history should never be the part of subjective and same for other sections just dont repeat any data.
             Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
             Below is the transcript:\n\n{conversation_text}
 
@@ -7413,93 +7414,98 @@ async def format_dietician_assessment(gpt_response):
 
 async def format_consult_note(gpt_response):
     """
-    Formats the GPT response into a structured markdown report, keeping main headings fixed
-    and dynamically handling subheadings, excluding empty sections.
+    Format a consultation note from a structured GPT response.
     
     Args:
-        gpt_response (dict): The GPT response dictionary containing medical data.
-    
+        gpt_response: Dictionary containing the structured consultation note data
+        
     Returns:
-        str: A formatted markdown string.
+        Formatted string containing the human-readable consultation note
     """
-    formatted_report = "# Medical Report\n\n"
-    
-    # Dictionary to map main headings to their keys and display names
-    main_headings = {
-        "presenting_problems": "Presenting Problems",
-        "history_of_presenting_problems": "History of Presenting Problems",
-        "current_functioning": "Current Functioning",
-        "current_medications": "Current Medications",
-        "psychiatric_history": "Psychiatric History",
-        "medical_history": "Medical History",
-        "developmental_social_family_history": "Developmental, Social, and Family History",
-        "substance_use": "Substance Use",
-        "relevant_cultural_religious_spiritual_issues": "Cultural, Religious, and Spiritual Issues",
-        "risk_assessment": "Risk Assessment",
-        "mental_state_exam": "Mental State Exam",
-        "test_results": "Test Results",
-        "diagnosis": "Diagnosis",
-        "clinical_formulation": "Clinical Formulation",
-        "additional_notes": "Additional Notes"
-    }
-    
-    for key, display_name in main_headings.items():
-        if not gpt_response.get(key):  # Skip if section is empty or missing
-            continue
+    try:
+        note = []
+        
+        # Add heading
+        note.append("# CONSULTATION NOTE\n")
+
+        # CONSULTATION TYPE
+        if gpt_response.get("Consultation Type"):
+            note.append("## CONSULTATION TYPE")
+            for item in gpt_response["Consultation Type"]:
+                note.append(item)
+            note.append("")
+        
+        # HISTORY
+        if gpt_response.get("History"):
+            note.append("## HISTORY")
+            history = gpt_response["History"]
             
-        formatted_report += f"## {display_name}\n"
+            # History of Presenting Complaints
+            if history.get("History of Presenting Complaints"):
+                for item in history["History of Presenting Complaints"]:
+                    note.append(item)
+                note.append("")
+            # PMH/PSH
+            if history.get("ICE"):
+                note.append("ICE: ")
+                for item in history["ICE"]:
+                    note.append(item)
+                note.append("")
+            
+            # Relevant Risk Factors
+            if history.get("Relevant Risk Factors"):
+                for item in history["Relevant Risk Factors"]:
+                    note.append(item)
+                note.append("")
+            
+            # PMH/PSH
+            if history.get("PMH/PSH"):
+                note.append("PMH/PSH: ")
+                for item in history["PMH/PSH"]:
+                    note.append(item)
+                note.append("")
+
+            if history.get("DH"):
+                note.append("DH: ")
+                for item in history["DH"]:
+                    note.append(item)
+                note.append("")
+            
+            # FH
+            if history.get("FH"):
+                note.append("FH: ")
+                for item in history["FH"]:
+                    note.append(item)
+                note.append("")
+            # SH
+            if history.get("SH"):
+                note.append("SH: ")
+                for item in history["SH"]:
+                    note.append(item)
+                note.append("")
+                
+        # IMPRESSION
+        if gpt_response.get("Impression"):
+            note.append("## IMPRESSION")
+            for item in gpt_response["Impression"]:
+                # Handle non-bulleted impression statement
+                if not item.startswith("-"):
+                    note.append(item)
+                else:
+                    note.append(item)
+            note.append("")
         
-        data = gpt_response[key]
+        # PLAN
+        if gpt_response.get("Plan"):
+            note.append("## PLAN")
+            for item in gpt_response["Plan"]:
+                note.append(item)
+            note.append("")
         
-        if key == "presenting_problems":
-            for item in data:
-                if item.get("details"):
-                    formatted_report += "\n".join(item["details"]) + "\n\n"
-                    
-        elif key == "history_of_presenting_problems":
-            for issue in data:
-                issue_name = issue.get("issue_name", "Issue")
-                formatted_report += f"### {issue_name}\n"
-                if issue.get("details"):
-                    formatted_report += "\n".join(issue["details"]) + "\n\n"
-                    
-        elif key == "current_functioning":
-            for subkey, sub_data in data.items():
-                if sub_data:  # Only include non-empty subheadings
-                    formatted_report += f"### {subkey.replace('_', ' ').title()}\n"
-                    formatted_report += "\n".join(sub_data) + "\n\n"
-                    
-        elif key in ["current_medications", "psychiatric_history", "substance_use", 
-                     "relevant_cultural_religious_spiritual_issues", "risk_assessment", 
-                     "mental_state_exam", "test_results", "diagnosis", "additional_notes"]:
-            if isinstance(data, list):
-                formatted_report += "\n".join(data) + "\n\n"
-            else:
-                for subkey, sub_data in data.items():
-                    if isinstance(sub_data, list) and sub_data:  # Only include non-empty subheadings with data
-                        formatted_report += f"### {subkey.replace('_', ' ').title()}\n"
-                        formatted_report += "\n".join(sub_data) + "\n\n"
-        
-        elif key == "clinical_formulation":
-            for subkey, sub_data in data.items():
-                if sub_data:  # Only include non-empty subheadings
-                    if subkey == "case_formulation":
-                        formatted_report += f"### Case Formulation\n{sub_data}\n\n"
-                    else:
-                        formatted_report += f"### {subkey.replace('_', ' ').title()}\n"
-                        formatted_report += "\n".join(sub_data) + "\n\n"
-        
-        else:
-            # Generic handling for other main headings (like medical_history, etc.)
-            if isinstance(data, list):
-                formatted_report += "\n".join(data) + "\n\n"
-            else:
-                for subkey, sub_data in data.items():
-                    if sub_data:  # Only include non-empty subheadings
-                        formatted_report += f"### {subkey.replace('_', ' ').title()}\n"
-                        formatted_report += "\n".join(sub_data) + "\n\n"
-    
-    return formatted_report
+        return "\n".join(note)
+    except Exception as e:
+        error_logger.error(f"Error formatting consultation note: {str(e)}", exc_info=True)
+        return f"Error formatting consultation note: {str(e)}"
 
 async def format_referral_letter(gpt_response):
     """
