@@ -7469,8 +7469,13 @@ async def format_consult_note(gpt_response):
                 note.append(f"- PMH/PSH: {', '.join(pmh_psh_items)}")
                 note.append("")
 
+            # DH
+            dh_items = []
             if history.get("DH"):
-                dh_items = [item[2:].strip() for item in history["DH"]]  # Remove "- " prefix
+                dh_items= [item[2:].strip() for item in history["DH"]]
+            if history.get("DH/Allergies"):
+                dh_items= [item[2:].strip() for item in history["DH/Allergies"]]
+            if dh_items:
                 note.append(f"- DH/Allergies: {', '.join(dh_items)}")
                 note.append("")
 
