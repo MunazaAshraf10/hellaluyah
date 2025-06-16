@@ -2726,6 +2726,7 @@ By following these instructions, ensure the referral letter is accurate, profess
             - Omit any field or section if no relevant information is provided.
             - If some sentence is long split it into multiple points and write "-  " before each line.
             - Always include sub-headings if data available for them
+            - Never write plan without the subheading mentioned in the section if the data is available otherwise ignore that subheadings dont add it in report.
  
             
             Constraints
@@ -7447,9 +7448,8 @@ async def format_consult_note(gpt_response):
                 note.append("")
             # PMH/PSH
             if history.get("ICE"):
-                note.append("ICE: ")
-                for item in history["ICE"]:
-                    note.append(item)
+                ice_items = [item[2:].strip() for item in history["ICE"]]  # Remove "- " prefix
+                note.append(f"ICE: {', '.join(ice_items)}")
                 note.append("")
             
             # Relevant Risk Factors
@@ -7460,30 +7460,28 @@ async def format_consult_note(gpt_response):
             
             # PMH/PSH
             if history.get("PMH/PSH"):
-                note.append("PMH/PSH: ")
-                for item in history["PMH/PSH"]:
-                    note.append(item)
+                pmh_psh_items = [item[2:].strip() for item in history["PMH/PSH"]]  # Remove "- " prefix
+                note.append(f"PMH/PSH: {', '.join(pmh_psh_items)}")
                 note.append("")
 
             if history.get("DH"):
-                note.append("DH: ")
-                for item in history["DH"]:
-                    note.append(item)
+                dh_items = [item[2:].strip() for item in history["DH"]]  # Remove "- " prefix
+                note.append(f"DH/Allergies: {', '.join(dh_items)}")
                 note.append("")
-            
+
             # FH
             if history.get("FH"):
-                note.append("FH: ")
-                for item in history["FH"]:
-                    note.append(item)
+                fh_items = [item[2:].strip() for item in history["FH"]]  # Remove "- " prefix
+                note.append(f"FH: {', '.join(fh_items)}")
                 note.append("")
+            
+
             # SH
             if history.get("SH"):
-                note.append("SH: ")
-                for item in history["SH"]:
-                    note.append(item)
+                sh_items = [item[2:].strip() for item in history["SH"]]  # Remove "- " prefix
+                note.append(f"sH: {', '.join(sh_items)}")
                 note.append("")
-                
+
         # IMPRESSION
         if gpt_response.get("Impression"):
             note.append("## IMPRESSION")
@@ -7497,10 +7495,40 @@ async def format_consult_note(gpt_response):
         
         # PLAN
         if gpt_response.get("Plan"):
-            note.append("## PLAN")
-            for item in gpt_response["Plan"]:
-                note.append(item)
-            note.append("")
+            # Check if Plan is a dictionary (nested with sub-headings) or a list (flat)
+            plan = gpt_response["Plan"]
+            has_valid_content = False
+            
+            if isinstance(plan, dict):
+                # Handle nested Plan with sub-headings
+                valid_subheadings = []
+                for subheading, values in plan.items():
+                    # Ensure values is a list and not empty
+                    if isinstance(values, list) and values and any(v.strip() for v in values if v):
+                        valid_subheadings.append((subheading, values))
+                    elif isinstance(values, str) and values.strip():
+                        valid_subheadings.append((subheading, [f"- {values}"]))
+                
+                if valid_subheadings:
+                    has_valid_content = True
+                    note.append("## PLAN")
+                    for subheading, values in valid_subheadings:
+                        note.append(f"{subheading}: ")
+                        for value in values:
+                            note.append(value)
+                        note.append("")
+            
+            elif isinstance(plan, list) and any(item.strip() for item in plan if item):
+                # Handle flat Plan list (as in provided gpt_response)
+                has_valid_content = True
+                note.append("## PLAN")
+                for item in plan:
+                    note.append(item)
+                note.append("")
+            
+            # If no valid content, Plan section is not added
+            if not has_valid_content:
+                pass  # Skip adding Plan section
         
         return "\n".join(note)
     except Exception as e:
