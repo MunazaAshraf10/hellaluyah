@@ -7449,7 +7449,7 @@ async def format_consult_note(gpt_response):
             # PMH/PSH
             if history.get("ICE"):
                 ice_items = [item[2:].strip() for item in history["ICE"]]  # Remove "- " prefix
-                note.append(f"ICE: {', '.join(ice_items)}")
+                note.append(f"- ICE: {', '.join(ice_items)}")
                 note.append("")
             
             # Relevant Risk Factors
@@ -7461,25 +7461,25 @@ async def format_consult_note(gpt_response):
             # PMH/PSH
             if history.get("PMH/PSH"):
                 pmh_psh_items = [item[2:].strip() for item in history["PMH/PSH"]]  # Remove "- " prefix
-                note.append(f"PMH/PSH: {', '.join(pmh_psh_items)}")
+                note.append(f"- PMH/PSH: {', '.join(pmh_psh_items)}")
                 note.append("")
 
             if history.get("DH"):
                 dh_items = [item[2:].strip() for item in history["DH"]]  # Remove "- " prefix
-                note.append(f"DH/Allergies: {', '.join(dh_items)}")
+                note.append(f"- DH/Allergies: {', '.join(dh_items)}")
                 note.append("")
 
             # FH
             if history.get("FH"):
                 fh_items = [item[2:].strip() for item in history["FH"]]  # Remove "- " prefix
-                note.append(f"FH: {', '.join(fh_items)}")
+                note.append(f"- FH: {', '.join(fh_items)}")
                 note.append("")
             
 
             # SH
             if history.get("SH"):
                 sh_items = [item[2:].strip() for item in history["SH"]]  # Remove "- " prefix
-                note.append(f"sH: {', '.join(sh_items)}")
+                note.append(f"- sH: {', '.join(sh_items)}")
                 note.append("")
 
         # IMPRESSION
