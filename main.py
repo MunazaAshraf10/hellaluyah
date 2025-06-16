@@ -2639,6 +2639,10 @@ By following these instructions, ensure the referral letter is accurate, profess
 
 
         elif template_type == "consult_note":
+            current_date = None
+            if "metadata" in transcription and "current_date" in transcription["metadata"]:
+                current_date = transcription["metadata"]["current_date"]
+                main_logger.info(f"[OP-{operation_id}] Using current_date from metadata: {current_date}")
 
             user_instructions= f"""You are provided with a medical conversation transcript. 
             Analyze the transcript and generate a structured Consult note following the specified template. 
@@ -2666,6 +2670,7 @@ By following these instructions, ensure the referral letter is accurate, profess
             Use only information explicitly provided in the transcript or notes, avoiding any assumptions or invented details. 
             Ensure the output is concise, professional, and written in a doctor-like tone to facilitate clinical decision-making. 
             Summarize the transcript effectively to capture the patient’s case from a doctor’s perspective.
+            {grammar_instructions} {preservation_instructions} {date_instructions}
 
             Instructions
 
