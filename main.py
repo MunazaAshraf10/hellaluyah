@@ -2713,7 +2713,6 @@ By following these instructions, ensure the referral letter is accurate, profess
             - Omit any subheading or field if no relevant information is provided.
             - Do not assume normal findings unless explicitly stated.
             - Always include sub-headings if data available for them.
-            - Write each subheading only once and add all the information available for respective subheading under it dont dont repeat the subheadings.
             - Never write plan without the subheading mentioned in the section if the data is available otherwise ignore that subheadings dont add it in report.
  
 
@@ -2736,7 +2735,6 @@ By following these instructions, ensure the referral letter is accurate, profess
             - If some sentence is long split it into multiple points and write "-  " before each line.
             - Always include sub-headings if data available for them
             - Never write plan without the subheading mentioned in the section if the data is available otherwise ignore that subheadings dont add it in report.
-            - Write each subheading only once and add all the information available for respective subheading under it dont dont repeat the subheadings.
             
             Constraints
             - Data Source: Use only data from the provided transcript or contextual notes. Do not invent patient details, assessments, diagnoses, differential diagnoses, plans, interventions, evaluations, or safety netting advice.
@@ -7450,82 +7448,100 @@ async def format_consult_note(gpt_response):
             note.append("## HISTORY")
             history = gpt_response["History"]
             
-            # History of Presenting Complaints
-            if history.get("History of Presenting Complaints"):
-                for item in history["History of Presenting Complaints"]:
-                    note.append(item)
-                note.append("")
-            # PMH/PSH
-            if history.get("ICE"):
-                ice_items = [item[2:].strip() for item in history["ICE"]]  # Remove "- " prefix
-                note.append(f"- ICE: {', '.join(ice_items)}")
+            if isinstance(history, list):
+                # Handle History as a list of strings
+                for item in history:
+                    if item.strip():  # Skip empty items
+                        note.append(item)
                 note.append("")
             
-            # Relevant Risk Factors
-            if history.get("Relevant Risk Factors"):
-                for item in history["Relevant Risk Factors"]:
-                    note.append(item)
-                note.append("")
+            elif isinstance(history, dict):
+                # Handle History as a dictionary with sub-sections
+                # History of Presenting Complaints
+                if history.get("History of Presenting Complaints"):
+                    note.append("### History of Presenting Complaints")
+                    for item in history["History of Presenting Complaints"]:
+                        note.append(item)
+                    note.append("")
+                # PMH/PSH
+                if history.get("ICE"):
+                    ice_items = [item[2:].strip() for item in history["ICE"]]  # Remove "- " prefix
+                    note.append(f"- ICE: {', '.join(ice_items)}")
+                    note.append("")
+                
+                # Relevant Risk Factors
+                if history.get("Relevant Risk Factors"):
+                    for item in history["Relevant Risk Factors"]:
+                        note.append(item)
+                    note.append("")
             
-            # PMH/PSH
-            if history.get("PMH/PSH"):
-                pmh_psh_items = [item[2:].strip() for item in history["PMH/PSH"]]  # Remove "- " prefix
-                note.append(f"- PMH/PSH: {', '.join(pmh_psh_items)}")
-                note.append("")
+                # PMH/PSH
+                if history.get("PMH/PSH"):
+                    pmh_psh_items = [item[2:].strip() for item in history["PMH/PSH"]]  # Remove "- " prefix
+                    note.append(f"- PMH/PSH: {', '.join(pmh_psh_items)}")
+                    note.append("")
 
-            # DH
-            dh_items = []
-            if history.get("DH"):
-                dh_items= [item[2:].strip() for item in history["DH"]]
-            if history.get("DH/Allergies"):
-                dh_items= [item[2:].strip() for item in history["DH/Allergies"]]
-            if dh_items:
-                note.append(f"- DH/Allergies: {', '.join(dh_items)}")
-                note.append("")
+                # DH
+                dh_items = []
+                if history.get("DH"):
+                    dh_items= [item[2:].strip() for item in history["DH"]]
+                if history.get("DH/Allergies"):
+                    dh_items= [item[2:].strip() for item in history["DH/Allergies"]]
+                if dh_items:
+                    note.append(f"- DH/Allergies: {', '.join(dh_items)}")
+                    note.append("")
 
-            # FH
-            if history.get("FH"):
-                fh_items = [item[2:].strip() for item in history["FH"]]  # Remove "- " prefix
-                note.append(f"- FH: {', '.join(fh_items)}")
-                note.append("")
-            
+                # FH
+                if history.get("FH"):
+                    fh_items = [item[2:].strip() for item in history["FH"]]  # Remove "- " prefix
+                    note.append(f"- FH: {', '.join(fh_items)}")
+                    note.append("")
+                
 
-            # SH
-            if history.get("SH"):
-                sh_items = [item[2:].strip() for item in history["SH"]]  # Remove "- " prefix
-                note.append(f"- sH: {', '.join(sh_items)}")
-                note.append("")
+                # SH
+                if history.get("SH"):
+                    sh_items = [item[2:].strip() for item in history["SH"]]  # Remove "- " prefix
+                    note.append(f"- sH: {', '.join(sh_items)}")
+                    note.append("")
 
         if gpt_response.get("Examination"):
             note.append("## EXAMINATION")
             exam = gpt_response["Examination"]
             
-            if exam.get("Vital Signs"):
-                vital_items = [item[2:].strip() for item in exam["Vital Signs"]]  # Remove "- " prefix
-                note.append(f"- Vital Signs: {', '.join(vital_items)}")
-                note.append("")
-
-            # "Physical/Mental State Examination Findings
-            if exam.get("Physical/Mental State Examination Findings"):
-                for item in exam["Physical/Mental State Examination Findings"]:
-                    note.append(item)
+            if isinstance(exam, list):
+                # Handle History as a list of strings
+                for item in exam:
+                    if item.strip():  # Skip empty items
+                        note.append(item)
                 note.append("")
             
+            elif isinstance(exam, dict):
+        
+                if exam.get("Vital Signs"):
+                    vital_items = [item[2:].strip() for item in exam["Vital Signs"]]  # Remove "- " prefix
+                    note.append(f"- Vital Signs: {', '.join(vital_items)}")
 
-            # if exam.get("Physical/Mental State Examination Findings"):
-            #     phs_items = [item[2:].strip() for item in exam["Physical/Mental State Examination Findings"]]  # Remove "- " prefix
-            #     note.append(f"- {', '.join(phs_items)}")
-            #     note.append("")
-            
-            # Investigations with Results
-            if exam.get("Investigations with Results"):
-                for item in exam["Investigations with Results"]:
-                    note.append(item)
-                note.append("")
-            # if exam.get("Investigations with Results"):
-            #     iwr_items = [item[2:].strip() for item in exam["Investigations with Results"]]  # Remove "- " prefix
-            #     note.append(f"- {', '.join(iwr_items)}")
-            #     note.append("")
+                # "Physical/Mental State Examination Findings
+                if exam.get("Physical/Mental State Examination Findings"):
+                    for item in exam["Physical/Mental State Examination Findings"]:
+                        note.append(item)
+                    note.append("")
+                
+
+                # if exam.get("Physical/Mental State Examination Findings"):
+                #     phs_items = [item[2:].strip() for item in exam["Physical/Mental State Examination Findings"]]  # Remove "- " prefix
+                #     note.append(f"- {', '.join(phs_items)}")
+                #     note.append("")
+                
+                # Investigations with Results
+                if exam.get("Investigations with Results"):
+                    for item in exam["Investigations with Results"]:
+                        note.append(item)
+                    note.append("")
+                # if exam.get("Investigations with Results"):
+                #     iwr_items = [item[2:].strip() for item in exam["Investigations with Results"]]  # Remove "- " prefix
+                #     note.append(f"- {', '.join(iwr_items)}")
+                #     note.append("")
 
         # IMPRESSION
         if gpt_response.get("Impression"):
