@@ -2670,7 +2670,7 @@ By following these instructions, ensure the referral letter is accurate, profess
             Use only information explicitly provided in the transcript or notes, avoiding any assumptions or invented details. 
             Ensure the output is concise, professional, and written in a doctor-like tone to facilitate clinical decision-making. 
             Summarize the transcript effectively to capture the patient’s case from a doctor’s perspective.
-            {grammar_instructions} {preservation_instructions} {date_instructions}
+            {date_instructions}
 
             Instructions
 
