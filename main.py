@@ -2080,13 +2080,10 @@ async def transcribe_chunk(chunk: bytes, chunk_index: int, enable_diarization: b
             "utterances": "true",
             "utt_split": 0.6,           # More aggressive utterance splitting
             "diarize": "true",
-            "diarization": {
-                "speakers": 2,          # Explicitly indicate 2 speakers
-                "sensitivity": "high"   # Increase sensitivity to speaker changes
-            },
             "sentiment": "true",
             "language": "en",
-            "model": "nova-2-medical"
+            "model": "nova-2-medical",
+            "sensitivity": "high" 
         }
 
         
