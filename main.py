@@ -1090,10 +1090,11 @@ async def save_summary_to_dynamodb(ai_summary, transcript_id):
     return summary_id
     
 # Save formatted report to DynamoDB
-async def save_report_to_dynamodb(transcript_id, gpt_response, formatted_report, template_type, status="completed"):
+async def save_report_to_dynamodb(transcript_id, gpt_response, formatted_report, template_type, status="completed" , report_id : str = None ):
     try:
         operation_id = str(uuid.uuid4())[:8]
-        report_id = str(uuid.uuid4())
+        if not report_id:
+            report_id = str(uuid.uuid4())
         timestamp = datetime.now().isoformat()
         
         db_logger.info(f"[OP-{operation_id}] Saving report to DynamoDB, ID: {report_id}, linked to transcript: {transcript_id}")
@@ -1739,7 +1740,6 @@ async def get_report_history():
             status_code=500
         )
 
-   
 @log_execution_time
 async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, str]:
     """
@@ -4542,7 +4542,8 @@ async def save_report_background(
     transcript_id: str,
     gpt_response: str,
     template_type: str,
-    status: str
+    status: str,
+    report_id: str
 ):
     """
     Background task to save report to DynamoDB.
@@ -4558,7 +4559,8 @@ async def save_report_background(
             gpt_response,
             gpt_response,  # Same as gpt_response
             template_type,
-            status
+            status,
+            report_id,
         )
         main_logger.info(f"Background task saved report {report_id} for transcript {transcript_id}")
     except Exception as e:
@@ -4570,7 +4572,8 @@ async def save_report_background(
             gpt_response,
             gpt_response,
             template_type,
-            "failed"
+            "failed",
+            report_id,
         )
 
 @app.post("/live_reporting")
@@ -4636,11 +4639,16 @@ async def live_reports(
                 {"status": "failed", "error": error_msg, "report_status": "failed"},
                 status_code=400
             )
-
+        # Generate a report_id now to pass along and use later
+        report_id = str(uuid.uuid4())
         # Collect streamed response for saving
         gpt_response = ""
         async def stream_and_collect() -> AsyncGenerator[str, None]:
             nonlocal gpt_response
+
+            metadata = json.dumps({"template_type": template_type, "report_id": report_id})
+            yield f"---meta:::{metadata}:::meta---\n"
+            
             async for chunk in stream_openai_report(transcription, template_type):
                 gpt_response += chunk
                 yield chunk
@@ -4651,7 +4659,8 @@ async def live_reports(
                 transcript_id,
                 gpt_response,
                 template_type,
-                "completed" if not gpt_response.startswith("Error:") else "failed"
+                "completed" if not gpt_response.startswith("Error:") else "failed",
+                report_id  # pass this explicitly
             )
 
         main_logger.info(f"Streaming report for transcript {transcript_id}, template {template_type}")
@@ -5226,11 +5235,15 @@ async def transcribe_and_generate_report(
             return JSONResponse({"status": "failed", "error": "Failed to save transcription"}, status_code=500)
 
         main_logger.info(f"Generating {template_type} template for transcript {transcript_id}")
-
+        report_id = str(uuid.uuid4())
         # Generator function for StreamingResponse
         async def generate_stream():
             full_response = ""
             try:
+
+                metadata = json.dumps({"template_type": template_type, "report_id": report_id})
+                yield f"---meta:::{metadata}:::meta---\n"
+
                 async for chunk in stream_openai_report(transcription_result, template_type):
                     full_response += chunk
                     yield chunk
@@ -5245,7 +5258,8 @@ async def transcribe_and_generate_report(
                         transcript_id,
                         full_response,
                         template_type,
-                        "completed"
+                        "completed",
+                        report_id,
                     )
 
         return StreamingResponse(generate_stream(), media_type="text/plain")
