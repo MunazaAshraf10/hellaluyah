@@ -10746,6 +10746,152 @@ async def format_report(gpt_response, template_type):
         return f"Error formatting report: {str(e)}"
 
 
+@app.post("/generate-template-report")
+@log_execution_time
+async def generate_template_report(
+    transcript_id: str = Form(...),
+    template_type: str = Form("clinical_report")
+):
+    """
+    Generate a formatted report using a specific template based on an existing transcript.
+    This endpoint can be used after either live transcription or AI summary to create the final report.
+    
+    Args:
+        transcript_id: ID of the transcript to use for report generation
+        template_type: Type of template report to generate
+    """
+    try:
+        # Initialize status tracking
+        report_status = "processing"
+        report_id = None
+        gpt_response = None
+        formatted_report = None
+
+        # Validate template type
+        valid_templates = ["clinical_report","h75","new_soap_note","soap_issues" ,"detailed_soap_note","soap_note", "progress_note", "mental_health_appointment", "cardiology_letter", "followup_note", "meeting_minutes","referral_letter","detailed_dietician_initial_assessment","psychology_session_notes","pathology_note", "consult_note","discharge_summary","case_formulation"]
+        
+        if template_type not in valid_templates:
+            error_msg = f"Invalid template type '{template_type}'. Must be one of: {', '.join(valid_templates)}"
+            error_logger.error(error_msg)
+            return JSONResponse({
+                "status": "failed",
+                "error": error_msg,
+                "report_status": "failed"
+            }, status_code=400)
+            
+        # Get transcript data
+        table = dynamodb.Table('transcripts')
+        response = table.get_item(Key={"id": transcript_id})
+        
+        if 'Item' not in response:
+            return JSONResponse({
+                "status": "failed",
+                "error": f"Transcript ID {transcript_id} not found",
+                "report_status": "failed"
+            }, status_code=404)
+            
+        transcript_item = response['Item']
+        
+        # Get transcript data
+        transcript_data = transcript_item.get('transcript', '{}')
+
+        # Check if it's a Binary object and decrypt if needed
+        if str(type(transcript_data)) == "<class 'boto3.dynamodb.types.Binary'>":
+            transcript_data = decrypt_data(transcript_data)
+            # Decode bytes to string after decryption
+            transcript_data = transcript_data.decode('utf-8')
+        elif isinstance(transcript_data, bytes):
+            transcript_data = decrypt_data(transcript_data).decode('utf-8')
+            
+        # Now parse the JSON
+        try:
+            transcription = json.loads(transcript_data)
+        except json.JSONDecodeError:
+            return JSONResponse({
+                "status": "failed",
+                "error": "Invalid transcript data format",
+                "report_status": "failed"
+            }, status_code=400)
+
+        try:
+            # Generate GPT response
+            main_logger.info(f"Generating {template_type} template for transcript {transcript_id}")
+            gpt_response = await generate_gpt_response(transcription, template_type)
+            
+            if isinstance(gpt_response, str) and gpt_response.startswith("Error"):
+                report_status = "failed"
+                return JSONResponse({
+                    "status": "failed",
+                    "error": gpt_response,
+                    "report_status": report_status
+                }, status_code=400)
+            
+            # Format the report
+            formatted_report = await format_report(gpt_response, template_type)
+            
+            if isinstance(formatted_report, str) and formatted_report.startswith("Error"):
+                report_status = "failed"
+                return JSONResponse({
+                    "status": "failed",
+                    "error": formatted_report,
+                    "report_status": report_status
+                }, status_code=400)
+            
+            # Save report to database
+            report_id = await save_report_to_dynamodb(
+                transcript_id,
+                gpt_response,
+                formatted_report,
+                template_type,
+                status=report_status
+            )
+            
+            report_status = "completed"
+            
+            # Return the complete response
+            response_data = {
+                "status": "success",
+                "report_status": report_status,
+                "transcript_id": transcript_id,
+                "report_id": report_id,
+                "template_type": template_type,
+                "gpt_response": json.loads(gpt_response) if gpt_response else None,
+                "formatted_report": formatted_report
+            }
+            
+            main_logger.info(f"Report generation completed successfully")
+            return JSONResponse(response_data)
+
+        except Exception as e:
+            error_msg = f"Error during processing: {str(e)}"
+            error_logger.exception(error_msg)
+            
+            # Update status in DynamoDB if we have ID
+            if report_id:
+                await save_report_to_dynamodb(
+                    transcript_id,
+                    gpt_response,
+                    formatted_report,
+                    template_type,
+                    status="failed"
+                )
+            
+            return JSONResponse({
+                "status": "failed",
+                "error": error_msg,
+                "report_status": report_status,
+                "report_id": report_id
+            }, status_code=500)
+
+    except Exception as e:
+        error_msg = f"Unexpected error in generate_template_report: {str(e)}"
+        error_logger.exception(error_msg)
+        return JSONResponse({
+            "status": "failed",
+            "error": error_msg,
+            "report_status": "failed"
+        }, status_code=500)
+       
 # ... (Previous code remains unchanged up to the WebSocket endpoint definition)
 @app.websocket("/ws/transcribe-and-generate-report")
 @log_execution_time
