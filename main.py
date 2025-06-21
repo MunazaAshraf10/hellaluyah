@@ -8,6 +8,7 @@ from typing import AsyncGenerator
 import os
 import openai
 import logging
+from typing import Optional
 from openai import AsyncOpenAI
 from functools import wraps
 import asyncio
@@ -196,255 +197,6 @@ dynamodb = boto3.resource(
     aws_secret_access_key=AWS_SECRET_KEY,
     region_name=AWS_REGION
 )
-
-# Add a new schema for discharge summaries
-DISCHARGE_SUMMARY_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "client": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "dob": {"type": "string"},
-                "discharge_date": {"type": "string"}
-            }
-        },
-        "referral": {
-            "type": "object",
-            "properties": {
-                "source": {"type": "string"},
-                "reason": {"type": "string"}
-            }
-        },
-        "presenting_issues": {"type": "array", "items": {"type": "string"}},
-        "diagnosis": {"type": "array", "items": {"type": "string"}},
-        "treatment_summary": {
-            "type": "object",
-            "properties": {
-                "duration": {"type": "string"},
-                "sessions": {"type": "string"},
-                "therapy_type": {"type": "string"},
-                "goals": {"type": "array", "items": {"type": "string"}},
-                "description": {"type": "string"},
-                "medications": {"type": "string"}
-            }
-        },
-        "progress": {
-            "type": "object",
-            "properties": {
-                "overall": {"type": "string"},
-                "goal_progress": {"type": "array", "items": {"type": "string"}}
-            }
-        },
-        "clinical_observations": {
-            "type": "object",
-            "properties": {
-                "engagement": {"type": "string"},
-                "strengths": {"type": "array", "items": {"type": "string"}},
-                "challenges": {"type": "array", "items": {"type": "string"}}
-            }
-        },
-        "risk_assessment": {"type": "string"},
-        "outcome": {
-            "type": "object",
-            "properties": {
-                "current_status": {"type": "string"},
-                "remaining_issues": {"type": "string"},
-                "client_perspective": {"type": "string"},
-                "therapist_assessment": {"type": "string"}
-            }
-        },
-        "discharge_reason": {
-            "type": "object",
-            "properties": {
-                "reason": {"type": "string"},
-                "client_understanding": {"type": "string"}
-            }
-        },
-        "discharge_plan": {"type": "string"},
-        "recommendations": {
-            "type": "object",
-            "properties": {
-                "overall": {"type": "string"},
-                "followup": {"type": "array", "items": {"type": "string"}},
-                "self_care": {"type": "array", "items": {"type": "string"}},
-                "crisis_plan": {"type": "string"},
-                "support_systems": {"type": "string"}
-            }
-        },
-        "additional_notes": {"type": "string"},
-        "final_note": {"type": "string"},
-        "clinician": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "date": {"type": "string"}
-            }
-        },
-        "attachments": {"type": "array", "items": {"type": "string"}}
-    }
-}
-
-CASE_FORMULATION_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "client_goals": {
-            "type": ["string", "null"],
-            "description": "The client's expressed goals and aspirations"
-        },
-        "presenting_problems": {
-            "oneOf": [
-                {
-                    "type": "string"
-                },
-                {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            ]
-        },
-        "predisposing_factors": {
-            "oneOf": [
-                {
-                    "type": "string"
-                },
-                {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            ]
-        },
-        "precipitating_factors": {
-            "oneOf": [
-                {
-                    "type": "string"
-                },
-                {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            ]
-        },
-        "perpetuating_factors": {
-            "oneOf": [
-                {
-                    "type": "string"
-                },
-                {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            ]
-        },
-        "protective_factors": {
-            "oneOf": [
-                {
-                    "type": "string"
-                },
-                {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            ]
-        },
-        "problem_list": {
-            "oneOf": [
-                {
-                    "type": "string"
-                },
-                {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            ]
-        },
-        "treatment_goals": {
-            "oneOf": [
-                {
-                    "type": "string"
-                },
-                {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            ]
-        },
-        "case_formulation": {
-            "type": "string"
-        },
-        "treatment_mode": {
-            "oneOf": [
-                {
-                    "type": "string"
-                },
-                {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            ]
-        }
-    },
-    "required": ["client_goals", "presenting_problems", "predisposing_factors", 
-                "precipitating_factors", "perpetuating_factors", "protective_factors", 
-                "problem_list", "treatment_goals", "case_formulation", "treatment_mode"]
-}
-
-PATHOLOGY_NOTE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "therapy_attendance": {
-            "type": "object",
-            "properties": {
-                "current_issues": {"type": "string"},
-                "past_medical_history": {"type": "string"},
-                "medications": {"type": "string"},
-                "social_history": {"type": "string"},
-                "allergies": {"type": "string"}
-            }
-        },
-        "objective": {
-            "type": "object",
-            "properties": {
-                "examination_findings": {"type": "string"},
-                "diagnostic_tests": {"type": "string"}
-            }
-        },
-        "reports": {"type": "string"},
-        "therapy": {
-            "type": "object",
-            "properties": {
-                "current_therapy": {"type": "string"},
-                "therapy_changes": {"type": "string"}
-            }
-        },
-        "outcome": {"type": "string"},
-        "plan": {
-            "type": "object",
-            "properties": {
-                "future_plan": {"type": "string"},
-                "followup": {"type": "string"}
-            }
-        }
-    }
-}
-
-
 
 # Reusable HTTP client
 http_client = httpx.AsyncClient(timeout=60.0)
@@ -2224,7 +1976,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             Make sure the output is concise and to the point.
             ENsure the data in all letter should be to the point and professional.
             Make it useful as doctors perspective so it makes there job easier, dont just dictate and make a letter, analyze the conversation, summarize it and make a note that best desrcibes the patient's case as a doctor's perspective.
-            For each point add - at the beginning of the line and give two letter space after that.
+            For each point add • at the beginning of the line and give two letter space after that.
             Add time related information in the report dont miss them.
             Make sure the point are structured and looks professional and uses medical terms to describe everything.
             Use medical terms to describe each thing
@@ -2242,6 +1994,9 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             Write "[Your Full Name]" if name of the doctor that is referring is unknown (try to see if the patient ever called the doctor by its name in conversation that is bascially the doctor name).
             Write "[Your Title]" if title of the doctor that is referring is unknown (try to see if the title of doctor was disclosed in conversation that is bascially the doctor's tittle or try to analyze who it can be by analyzing conversation).
             Below is the transcript:\n\n{conversation_text}
+
+            Below is the format how i wanna structure my report:
+            {formatting_instructions}
             """
             system_message = f"""You are a medical documentation AI tasked with creating a referral letter based solely on the information provided in a conversation transcript, contextual notes, or clinical note. 
             Your goal is to produce a professional, concise, and accurate referral letter that adheres to the template below. 
@@ -2249,6 +2004,9 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             Do not infer, assume, or add any details not explicitly stated. 
             If information for a specific section or placeholder is missing, leave that section or placeholder blank without indicating that the information was not provided. 
             The output must be formatted as plain text with clear section breaks and proper spacing, maintaining a formal, doctor-like tone suitable for medical correspondence.
+
+            Below is the format how i wanna structure my report:
+            {formatting_instructions} {grammar_instructions} {date_instructions}
 
             Referral Letter Template:
 
@@ -2269,21 +2027,21 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
            
             I am referring [Patient’s Name] to your clinic for further evaluation and management of [specific condition or concern].
             
-            Clinical Details:
+            ## Clinical Details:
             Presenting Complaint: [e.g., Persistent abdominal pain, recurrent headaches]
             Duration: [e.g., Symptoms have been present for 6 months]
             Relevant Findings: [e.g., Significant weight loss, abnormal imaging findings]
             Past Medical History: [e.g., Hypertension, diabetes]
             Current Medications: [e.g., List of current medications]
             
-            Investigations:
+            ## Investigations:
             Recent Tests: [e.g., Blood tests, MRI, X-rays]
             Results: [e.g., Elevated liver enzymes, abnormal MRI findings]
             
-            Reason for Referral:
+            ## Reason for Referral:
             Due to [e.g., worsening symptoms, need for specialized evaluation], I would appreciate your expert assessment and management recommendations for this patient.
             
-            Patient’s Contact Information:
+            ## Patient’s Contact Information:
             Phone Number: [Patient’s Phone Number]
             Email Address: [Patient’s Email Address]
             
@@ -2358,31 +2116,31 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             Dear Dr. Sarah,
 
 
-            Re: Referral for Patient, DOB
+            Re: Referral for Patient, , [Date of Birth: DOB]
 
             I am referring this patient to your clinic for further evaluation and management of acute bronchitis with asthma exacerbation.
 
-            Clinical Details:
-            Presenting Complaint: Constant cough, shortness of breath, chest tightness, low-grade fever
-            Duration: Symptoms have been present for 6 days
-            Relevant Findings: Wheezing and crackles in both lower lung fields, red throat, post-nasal drip present, yellowish-green sputum, fatigue with minimal exertion
-            Past Medical History: Mild asthma, Type 2 diabetes diagnosed 3 years ago, Ex-smoker (quit 10 years ago), No known allergies
-            Current Medications: Albuterol inhaler 1-2 times weekly, Metformin 500mg twice daily
+            ## Clinical Details:
+            • Presenting Complaint: Constant cough, shortness of breath, chest tightness, low-grade fever
+            • Duration: Symptoms have been present for 6 days
+            • Relevant Findings: Wheezing and crackles in both lower lung fields, red throat, post-nasal drip present, yellowish-green sputum, fatigue with minimal exertion
+            • Past Medical History: Mild asthma, Type 2 diabetes diagnosed 3 years ago, Ex-smoker (quit 10 years ago), No known allergies
+            • Current Medications: Albuterol inhaler 1-2 times weekly, Metformin 500mg twice daily
 
-            Investigations:
-            Recent Tests: Vital signs
-            Results: Temperature: 37.6°C, Respiratory rate: 22, Oxygen saturation: 94%, Heart rate: 92 bpm
+            ## Investigations:
+            • Recent Tests: Vital signs
+            • Results: Temperature: 37.6°C, Respiratory rate: 22, Oxygen saturation: 94%, Heart rate: 92 bpm
 
 
-            Reason for Referral:
+            ## Reason for Referral:
             Due to worsening respiratory symptoms complicated by underlying asthma and diabetes, I would appreciate your expert assessment and management recommendations for this patient.
 
 
-            Patient's Contact Information: 
-
+            ## Patient's Contact Information: 
+            Phone Number: [Patient’s Phone Number]
+            Email Address: [Patient’s Email Address]
 
             Thank you for your attention to this referral. I look forward to your evaluation and recommendations.
-
 
             Yours sincerely,
 
@@ -2461,29 +2219,27 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
 
             I am referring this patient to your clinic for further evaluation and management of depression with anxiety in the context of bipolar disorder.
 
-            Clinical Details:
-            Presenting Complaint: Depression, anxiety, and panic attacks
-            Duration: Symptoms have been present for at least one month
-            Relevant Findings: Morning retching/vomiting for the past month, sensation of knot in throat, chest pain during panic attacks, fatigue, feeling overwhelmed, low mood, lack of motivation, anhedonia, reduced appetite, poor concentration
-            Past Medical History: Bipolar disorder
-            Current Medications: Monthly injections for bipolar disorder (previously on lithium but discontinued due to side effects including dizziness, cognitive slowing, and nausea)
+            ## Clinical Details:
+            • Presenting Complaint: Depression, anxiety, and panic attacks
+            • Duration: Symptoms have been present for at least one month
+            • Relevant Findings: Morning retching/vomiting for the past month, sensation of knot in throat, chest pain during panic attacks, fatigue, feeling overwhelmed, low mood, lack of motivation, anhedonia, reduced appetite, poor concentration
+            • Past Medical History: Bipolar disorder
+            • Current Medications: Monthly injections for bipolar disorder (previously on lithium but discontinued due to side effects including dizziness, cognitive slowing, and nausea)
 
-            Investigations:
-            Recent Tests: Mental state examination
-            Results: Patient appears depressed and anxious
+            ## Investigations:
+            • Recent Tests: Mental state examination
+            • Results: Patient appears depressed and anxious
 
-
-            Reason for Referral:
+            ## Reason for Referral:
             Due to recurrence of panic attacks after a three-month symptom-free period and worsening depressive symptoms, I would appreciate your expert assessment and management recommendations for this patient.
 
-
-            Patient's Contact Information: 
-
+            ## Patient's Contact Information: 
+            Phone Number: [Patient’s Phone Number]
+            Email Address: [Patient’s Email Address]
 
             Enclosed are relevant clinical notes for your review. Please do not hesitate to contact me if you require further information.
 
             Thank you for your attention to this referral. I look forward to your evaluation and recommendations.
-
 
             Yours sincerely,
 
@@ -2508,7 +2264,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             For time references (e.g., “this morning,” “last Wednesday”), convert to specific dates based on today’s date, current day's date whatever it is on calender.
             Include the all numbers in numeric format.
             Make sure the output is concise and to the point.
-            Ensure that each point of (Consultation Type, History, Examination, Impression, and Plan) starts with "- ".
+            Ensure that each point of (Consultation Type, History, Examination, Impression, and Plan) starts with "• ".
             ENsure the data in (Consultation Type, History, Examination, Impression, and Plan) should be concise to the point and professional.
             Make it useful as doctors perspective so it makes there job easier, dont just dictate and make a note, analyze the conversation, summarize it and make a note that best desrcibes the patient's case as a doctor's perspective.
             For each point add - at the beginning of the line and give two letter space after that.
@@ -2518,6 +2274,9 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             Dont repeat anyything dude please.
             Include sub-headings as specified below in format in output
             Below is the transcript:\n\n{conversation_text}
+
+            Below is the instructions to format report:
+            {formatting_instructions}
             """
             # Add the new system prompt for consultation notes
             system_message = f"""You are a medical documentation assistant tasked with generating a structured consult note in text format based solely on a provided medical conversation transcript or contextual notes. 
@@ -2526,7 +2285,8 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             Ensure the output is concise, professional, and written in a doctor-like tone to facilitate clinical decision-making. 
             Summarize the transcript effectively to capture the patient’s case from a doctor’s perspective.
             {date_instructions}
-
+            Below is the instructions to format report:
+            {formatting_instructions}
             Instructions
 
             Output Structure
@@ -2536,20 +2296,22 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
                 c) Examination: Include subheadings for Vital Signs, Physical/Mental State Examination Findings, and Investigations with Results.
                 d) Impression: List each issue with its likely diagnosis and differential diagnosis (if mentioned).
                 e) Plan: Include investigations planned, treatment planned, referrals, follow-up plan, and safety netting advice for each issue (if mentioned).
-            - Use bullet points (`- `) for all items under History, Examination, and Plan sections.
+            - Use bullet points (`• `) for all items under History, Examination, and Plan sections.
             - Populate fields only with data explicitly mentioned in the transcript or notes. Leave fields blank (omit the field or section) if no relevant data is provided.
             - Use a concise, professional tone, e.g., "Fatigue and dull headache since May 29, 2025. Ibuprofen taken with minimal relief."
-            - If some sentence is long split it into multiple points and write "-  " before each line.
+            - If some sentence is long split it into multiple points and write "• " before each line.
 
             Consult Note Format: 
 
-            Consultation Type:
-            - Specify "F2F" or "T/C" based on the consultation method mentioned in the transcript.
-            - Note presence of others (e.g., "seen alone" or "seen with [person]") based on introductions.
-            - State the reason for visit (e.g., presenting complaint, booking note, follow-up) as mentioned.
+            # Consult Note
 
-            History:
-            - Include the following subheadings, using bullet points (`- `) for each item:
+            ## Consultation Type:
+            • Specify "F2F" or "T/C" based on the consultation method mentioned in the transcript.
+            • Note presence of others (e.g., "seen alone" or "seen with [person]") based on introductions.
+            • State the reason for visit (e.g., presenting complaint, booking note, follow-up) as mentioned.
+
+            ## History:
+            - Include the following subheadings, using bullet points (`• `) for each item:
                 a) History of Presenting Complaints: Summarize the patient’s chief complaints, including duration, timing, location, quality, severity, or context, if mentioned.
                 b) ICE: Patient’s Ideas, Concerns, and Expectations, if mentioned.
                 c) Red Flag Symptoms: Presence or absence of red flag symptoms relevant to the presenting complaint, if mentioned. Try to accomodate all red flag in concise way in 1-2 points if they are mentioned.
@@ -2560,8 +2322,8 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
                 h) SH: Social history (e.g., lives with, occupation, smoking/alcohol/drugs, recent travel, carers/package of care), if mentioned.
             - Omit any subheading or field if no relevant information is provided.
 
-            Examination:
-            - Include the following subheadings, using bullet points (`- `) for each item:
+            ## Examination:
+            - Include the following subheadings, using bullet points (`• `) for each item:
                 a) Vital Signs: List vital signs (e.g., temperature, oxygen saturation, heart rate, blood pressure, respiratory rate), if mentioned.
                 b) Physical/Mental State Examination Findings: System-specific examination findings, if mentioned. Use multiple bullet points as needed.
                 c) Investigations with Results: Completed investigations and their results, if mentioned.
@@ -2571,15 +2333,15 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             - Never write plan without the subheading mentioned in the section if the data is available otherwise ignore that subheadings dont add it in report.
  
 
-            Impression:
+            ## Impression:
             - List each issue, problem, or request as a separate entry, formatted as:
             - "[Issue name]. [Likely diagnosis (condition name only, if mentioned)]"
-            - Use a bullet point (`- `) for differential diagnosis, if mentioned (e.g., "- Differential diagnosis: [list]").
+            - Use numbering (1. ) for differential diagnosis, if mentioned (e.g., "• Differential diagnosis: [list]").
             - Include multiple issues (e.g., Issue 1, Issue 2, etc.) if mentioned, matching the chief complaints.
             - Omit any issue or field if not mentioned.
 
             Plan:
-            - Use bullet points (`- `) for each item, including:
+            - Use bullet points (`• `) for each item, including:
                 a) Investigations Planned: Planned or ordered investigations for each issue, if mentioned.
                 b) Treatment Planned: Planned treatments for each issue, if mentioned.
                 c) Relevant Referrals: Referrals for each issue, if mentioned.
@@ -2587,21 +2349,21 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
                 e) Advice: Advice given (e.g., symptoms requiring GP callback, 111 call for non-life-threatening issues, or A&E/999 for emergencies), if mentioned.
             - Group plans by issue (e.g., Issue 1, Issue 2) for clarity, if multiple issues are present.
             - Omit any field or section if no relevant information is provided.
-            - If some sentence is long split it into multiple points and write "-  " before each line.
+            - If some sentence is long split it into multiple points and write "•  " before each line.
             - Always include sub-headings if data available for them
             - Never write plan without the subheading mentioned in the section if the data is available otherwise ignore that subheadings dont add it in report.
             
             Constraints
             - Data Source: Use only data from the provided transcript or contextual notes. Do not invent patient details, assessments, diagnoses, differential diagnoses, plans, interventions, evaluations, or safety netting advice.
-            - Tone and Style**: Maintain a professional, concise tone suitable for medical documentation. Avoid verbose or redundant phrasing.
-            - Time References**: Convert all time-related information (e.g., "yesterday", "2 days ago") to specific dates based on June 5, 2025 (Thursday). Examples:
+            - Tone and Style: Maintain a professional, concise tone suitable for medical documentation. Avoid verbose or redundant phrasing.
+            - Time References: Convert all time-related information (e.g., "yesterday", "2 days ago") to specific dates based on June 5, 2025 (Thursday). Examples:
             - This morning → Today's Date
             - "Yesterday" → Yesterday's date
             - "A week ago" → Date exactly a week ago
             - Use numeric format for numbers (e.g., "2" not "two").
             - Analysis: Analyze and summarize the transcript to reflect the patient’s case from a doctor’s perspective, ensuring the note is useful for clinical decision-making.
             - Empty Input: If no transcript or notes are provided, return an empty consult note structure with only the required section headings.
-            - Formatting: Use bullet points (`- `) for History, Examination, and Plan sections. Ensure impression section follows the specified format without bullet points for the issue/diagnosis line. Do not state that information was not mentioned; simply omit the relevant field or section.
+            - Formatting: Use bullet points (`• `) for History, Examination, and Plan sections. Ensure impression section follows the specified format without bullet points for the issue/diagnosis line. Do not state that information was not mentioned; simply omit the relevant field or section.
 
             Output
             - Generate a text-based consult note adhering to the specified structure, populated only with data explicitly provided in the transcript or notes. Ensure the note is concise, structured, and professional.
@@ -2648,34 +2410,39 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             F2F seen alone. Constant cough, shortness of breath, chest tightness, low-grade fever for past 6 days.
 
             History:
-            - Constant cough with yellowish-green sputum, SOB, chest tightness, low-grade fever for 6 days
-            - Symptoms worsening, fatigue with minimal exertion
-            - Wheezing, chest heaviness, no sharp pain
-            - Symptoms worse at night
-            - Initially thought it was just a cold
-            - Son had bad cold last week
-            - PMH: Mild asthma, uses albuterol inhaler 1-2 times weekly, Type 2 diabetes diagnosed 3 years ago
-            - DH: Metformin 500mg BD, albuterol inhaler PRN. Allergies: None known
-            - SH: Ex-smoker, quit 10 years ago
+            • Constant cough with yellowish-green sputum, SOB, chest tightness, low-grade fever for 6 days
+            • Symptoms worsening, fatigue with minimal exertion
+            • Wheezing, chest heaviness, no sharp pain
+            • Symptoms worse at night
+            • Initially thought it was just a cold
+            • Son had bad cold last week
+            • PMH: Mild asthma, uses albuterol inhaler 1-2 times weekly, Type 2 diabetes diagnosed 3 years ago
+            • DH: Metformin 500mg BD, albuterol inhaler PRN. Allergies: None known
+            • SH: Ex-smoker, quit 10 years ago
 
             Examination:
-            - T 37.6°C, Sats 94%, HR 92 bpm, RR 22
-            - Wheezing and crackles in both lower lung fields
-            - Red throat, post-nasal drip present
+            • T 37.6°C, Sats 94%, HR 92 bpm, RR 22
+            • Wheezing and crackles in both lower lung fields
+            • Red throat, post-nasal drip present
 
             Impression:
             1. Acute bronchitis with asthma exacerbation. Acute bronchitis complicated by asthma and diabetes
             2. Type 2 Diabetes
 
             Plan:
-            - Investigations: Follow-up in 3-5 days to reassess lungs and glucose control
-            - Treatment: Amoxicillin clavulanate 875/125mg BD for 7 days, increase albuterol inhaler to every 4-6 hours PRN, prednisone 40mg daily for 5 days, guaifenesin with dextromethorphan for cough PRN
-            - Monitor blood glucose more frequently while on prednisone
-            - Continue metformin 500mg BD
-            - Rest, stay hydrated, avoid exertion
-            - Use humidifier at night, avoid cold air
-            - Seek emergency care if oxygen drops below 92% or breathing worsens
-            - Counselled regarding sedative effects of cough medication
+            • Investigations Planned:
+                • Follow-up in 3-5 days to reassess lungs and glucose control.
+            • Treatment Planned:
+                • Amoxicillin clavulanate 875/125mg BD for 7 days.
+                • Increase albuterol inhaler to every 4-6 hours PRN.
+                • Prednisone 40mg daily for 5 days.
+                • Guaifenesin with dextromethorphan for cough PRN.
+            • Advice:
+                • Monitor blood glucose more frequently while on prednisone.
+                • Rest, stay hydrated, avoid exertion.
+                • Use humidifier at night, avoid cold air.
+                • Seek emergency care if oxygen drops below 92% or breathing worsens.
+                • Counselled regarding sedative effects of cough medication.
 
 
             Example 2:
@@ -2731,43 +2498,46 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
 
             Example CONSULT Note Output:
 
+            # Consult Note
+
+            ## Consultation Type:
             F2F seen alone. Feeling depressed and anxious.
 
-            History:
-            - Scheduled appointment earlier than usual due to feeling depressed and anxious
-            - Panic attack this morning with chest pain, fatigue, feeling overwhelmed
-            - Sensation of knot in throat
-            - Morning retching/vomiting for past month
-            - Panic attacks occurring weekly previously, stopped for three months, recent recurrence
-            - Work-related stress (currently in sales at Verizon)
-            - Previous employment at Wells Fargo (more stressful), Uber (less stressful but poor pay), AT&T (had to leave due to illness)
-            - Low mood, lack of motivation, anhedonia (no longer interested in previously enjoyed activities like movies/TV)
-            - Spends free time scrolling through Facebook, chatting with friend in Cuba
-            - Lives with husband and 4-year-old daughter
-            - Reduced interest in family activities, though takes daughter to park
-            - Sleep: 10+ hours (normal pattern)
-            - Reduced appetite
-            - Poor concentration for past month
-            - No suicidal/homicidal ideation
-            - No hallucinations
-            - No recent manic episodes
-            - History of bipolar disorder (aware of manic episode symptoms, husband monitoring)
-            - Previously on lithium but discontinued due to side effects (dizziness, cognitive slowing, nausea)
-            - Currently receiving monthly injections
+            ## History:
+            • Scheduled appointment earlier than usual due to feeling depressed and anxious
+            • Panic attack this morning with chest pain, fatigue, feeling overwhelmed
+            • Sensation of knot in throat
+            • Morning retching/vomiting for past month
+            • Panic attacks occurring weekly previously, stopped for three months, recent recurrence
+            • Work-related stress (currently in sales at Verizon)
+            • Previous employment at Wells Fargo (more stressful), Uber (less stressful but poor pay), AT&T (had to leave due to illness)
+            • Low mood, lack of motivation, anhedonia (no longer interested in previously enjoyed activities like movies/TV)
+            • Spends free time scrolling through Facebook, chatting with friend in Cuba
+            • Lives with husband and 4-year-old daughter
+            • Reduced interest in family activities, though takes daughter to park
+            • Sleep: 10+ hours (normal pattern)
+            • Reduced appetite
+            • Poor concentration for past month
+            • No suicidal/homicidal ideation
+            • No hallucinations
+            • No recent manic episodes
+            • History of bipolar disorder (aware of manic episode symptoms, husband monitoring)
+            • Previously on lithium but discontinued due to side effects (dizziness, cognitive slowing, nausea)
+            • Currently receiving monthly injections
 
-            Examination:
-            - Mental state: Appears depressed and anxious
+            ## Examination:
+            • Mental state: Appears depressed and anxious
 
-            Impression:
+            ## Impression:
             1. Depression with anxiety
             2. Bipolar disorder (currently in depressive phase)
 
-            Plan:
-            - Continue monthly injections
-            - Start antidepressant medication (morning dose)
-            - Start anti-anxiety medication
-            - Safety netting: Monitor for signs of mania (hyperactivity, reduced sleep), contact if these develop
-            - Follow up appointment scheduled
+            ## Plan:
+            • Continue monthly injections
+            • Start antidepressant medication (morning dose)
+            • Start anti-anxiety medication
+            • Safety netting: Monitor for signs of mania (hyperactivity, reduced sleep), contact if these develop
+            • Follow up appointment scheduled
 
 """
 
@@ -2781,16 +2551,21 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             Analyze the transcript and produce a clinical note following the specified template. 
             Use only information explicitly provided in the transcript or contextual notes, and do not include or assume additional details. 
             Do not repeat anything.
-            Make each point concise and at the begining of it write "-  " and if some field has no data then ignore then field dont write anything under it. Make it to the point no need to use words like patient, client or anything make it direct.
+            Make each point concise and at the begining of it write "•  " and if some field has no data then ignore then field dont write anything under it. Make it to the point no need to use words like patient, client or anything make it direct.
             Be concise, to the point and make intelligent remarks.
             Ensure the output is a valid textual format. 
             Format professionally and concisely in a doctor-like tone using medical terminology. Capture all discussed topics, including non-clinical ones relevant to mental health care. Convert time references to DD/MM/YYYY format based on {current_date if current_date else "15/06/2025"}. Ensure points start with '- ', except for the case_formulation paragraph. Make the report concise, structured, and professional, describing the case directly without using 'patient' or 'client.' Omit sections with no data. Avoid repetition.
             Below is the transcript:\n\n{conversation_text}
+
+            Below is the instructions to format the report:
+            {formatting_instructions}
             """
 
-            system_message = f"""You are a highly skilled clinical psychologist tasked with generating a professional, medically sound clinical report in text/plain format based on a provided conversation transcript from a client's first appointment. Analyze the transcript thoroughly, extract relevant information, and produce a structured clinical note following the specified template. Use only information explicitly provided in the transcript or contextual notes, and do not include or assume additional details. Ensure the output is a valid textual format with the specified sections, formatted professionally and concisely in a doctor-like tone using medical terminology. Capture all discussed topics, including non-clinical ones, as they may be relevant to mental health care. Convert time references to specific dates in DD/MM/YYYY format based on {current_date if current_date else "15/06/2025"}. Ensure each point starts with "- " (dash followed by a space), except for the case_formulation paragraph. Make the report concise, structured, and professional, describing the case directly from a doctor's perspective without using terms like "patient" or "client." 
+            system_message = f"""You are a highly skilled clinical psychologist tasked with generating a professional, medically sound clinical report in text/plain format based on a provided conversation transcript from a client's first appointment. Analyze the transcript thoroughly, extract relevant information, and produce a structured clinical note following the specified template. Use only information explicitly provided in the transcript or contextual notes, and do not include or assume additional details. Ensure the output is a valid textual format with the specified sections, formatted professionally and concisely in a doctor-like tone using medical terminology. Capture all discussed topics, including non-clinical ones, as they may be relevant to mental health care. Convert time references to specific dates in DD/MM/YYYY format based on {current_date if current_date else "15/06/2025"}. Ensure each point starts with "• " (dash followed by a space), except for the case_formulation paragraph. Make the report concise, structured, and professional, describing the case directly from a doctor's perspective without using terms like "patient" or "client." 
             Avoid repetition and omit sections with no data.
             {grammar_instructions} {preservation_instructions} {date_instructions}
+            Below is the instructions to format the report:
+            {formatting_instructions}
 
 
             Template Structure:
@@ -2813,7 +2588,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             Verify date accuracy.
             Professional Tone and Terminology: Use a concise, doctor-like tone with medical terminology (e.g., "Reports anhedonia and insomnia since 15/05/2025"). Avoid repetition, direct quotes, or colloquial language.
             Formatting:
-            Ensure each point in all sections except clinical_formulation.case_formulation starts with "- ".
+            Ensure each point in all sections except clinical_formulation.case_formulation starts with "• ".
             
             Constraints:
             Use only transcript or contextual note data. Do not invent details, assessments, or plans.
@@ -2925,7 +2700,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
                 clinical_formulation
                 additional_notes
             Professional Tone and Terminology: Use a concise, professional, doctor-like tone with medical terminology (e.g., "Client reports dysphoric mood and anhedonia for one month"). Avoid repetition, direct quotes, or colloquial language. Use "Client" instead of "patient" or the client's name.
-            Formatting: Ensure each point in relevant sections (e.g., presenting_problems, history_of_presenting_problems, current_functioning, etc.) begins with "- " (dash followed by a single space). For clinical_formulation.case_formulation, use a single paragraph without bullet points. For additional_notes, use bullet points for any information not fitting the template.
+            Formatting: Ensure each point in relevant sections (e.g., presenting_problems, history_of_presenting_problems, current_functioning, etc.) begins with "• " (dash followed by a single space). For clinical_formulation.case_formulation, use a single paragraph without bullet points. For additional_notes, use bullet points for any information not fitting the template.
             Section-Specific Instructions:
                 - Presenting Problems: List each distinct issue or topic as an object in an array under presenting_problems, with a field details containing bullet points capturing the reason for the visit and associated stressors.
                 - History of Presenting Problems: For each issue, include an object in an array with fields for issue_name and details (onset, duration, course, severity).
@@ -3249,48 +3024,62 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             system_message = f"""You are a medical documentation expert specializing in creating detailed and professional progress notes.
         {preservation_instructions}
         {grammar_instructions}
+        {date_instructions}
+
+        Below is the format you need to follow for report
+        {formatting_instructions}
 
         CRITICAL STYLE INSTRUCTIONS:
-        1. Write as a doctor would write - using professional medical terminology
+        1. Write as a doctor would write • using professional medical terminology
         2. Format MOST sections as FULL PARAGRAPHS with complete sentences (not bullet points)
         3. Only the Plan and Recommendations section should use numbered bullet points
         4. Preserve all clinical details, dates, medication names, and dosages exactly as stated
         5. Be concise yet comprehensive, capturing all relevant clinical information
         6. Use formal medical writing style throughout
-        7. Never mention when information is missing - simply leave that section brief or empty
+        7. Never mention when information is missing • simply leave that section brief or empty
         8. When information is not present in the transcript, DO NOT include placeholder text
 
-        Format your response as a valid TEXT/Plain according to this schema:
-        {{
-        "clinic_info": {{
-            "name": "Clinic name if mentioned, otherwise empty string",
-            "address_line1": "Address line 1 if mentioned, otherwise empty string",
-            "address_line2": "Address line 2 if mentioned, otherwise empty string",
-            "phone": "Phone number if mentioned, otherwise empty string",
-            "fax": "Fax number if mentioned, otherwise empty string"
-        }},
-        "practitioner": {{
-            "name": "Practitioner's full name if mentioned",
-            "title": "Practitioner's title if mentioned"
-        }},
-        "patient": {{
-            "surname": "Patient's last name if mentioned",
-            "firstname": "Patient's first name if mentioned",
-            "dob": "Patient's date of birth if mentioned (format as DD/MM/YYYY)"
-        }},
-        "note_date": "Date of note if mentioned, otherwise use current date",
-        "introduction": "Full paragraph introducing the patient, including age, marital status, living situation",
-        "history": "Full paragraph describing patient's relevant medical history, chronic conditions, treatments",
-        "presentation": "Full paragraph describing patient's appearance, demeanor, and who they attended with",
-        "mood_mental_state": "Full paragraph describing patient's mood, mental state, thoughts of harm, paranoia, hallucinations",
-        "social_functional": "Full paragraph describing social relationships, daily functioning, support systems",
-        "physical_health": "Full paragraph describing physical health issues and management",
-        "plan": ["Array of specific recommendations, medications, follow-ups as numbered points"],
-        "closing": "Final paragraph with any concluding advice or recommendations"
-        }}
+        Format your response as a valid TEXT/Plain according to this format:
+        [Clinic Letterhead]
+
+        [Clinic Address Line 1]
+        [Clinic Address Line 2]
+        [Contact Number]
+        [Fax Number]
+
+        Practitioner: [Practitioner's Full Name and Title]
+
+        Surname: [Patient's Last Name]
+        First Name: [Patient's First Name]
+        Date of Birth: [Patient's Date of Birth] (use format: DD/MM/YYYY)
+
+        PROGRESS NOTE
+
+        [Date of Note] (use format: DD Month YYYY)
+
+        [Introduction] (Begin with a brief description of the patient, including their age, marital status, and living situation. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+
+        [Patient’s History and Current Status] (Describe the patient’s relevant medical history, particularly focusing on any chronic conditions or mental health diagnoses. Mention any treatments that have helped stabilize the condition, such as medication or psychotherapy. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+
+        [Presentation in Clinic] (Provide a description of the patient's physical appearance during the clinic visit. Include anyone who they attented the clinic with. Include observations about their appearance, demeanor, and cooperation. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+
+        [Mood and Mental State] (Describe the patient's mood and mental state as reported during the visit. Include details about their general mood stability, any thoughts of worthlessness, hopelessness, or harm, and their feelings of safety and security. Also mention if the patient denied or reported any paranoia or hallucinations. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+
+        [Social and Functional Status] (Discuss the patient's social relationships and their level of function in daily activities. Include information about their relationship with significant others, their participation in programs like NDIS, and their ability to manage household duties. If the patient receives help from others, such as a spouse, describe this support. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+
+        [Physical Health Issues] (Mention any physical health issues the patient is experiencing, such as obesity or arthritis. Include advice given to the patient about managing these conditions, and whether they are under the care of a general practitioner or specialist for these issues. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+
+        [Plan and Recommendations] (Outline the agreed-upon treatment plan based on the discussion with the patient and any accompanying individuals. Include recommendations to continue with current medications, ongoing programs like NDIS, and any other health advice provided, such as maintaining adequate water intake. Also include a plan for follow-up visits to monitor the patient’s mental health stability. You may list this part in numbered bullet points)
+
+        [Closing Statement] (Include any final advice or recommendations given to the patient. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+
+        [Practitioner's Full Name and Title]
+        Consultant Psychiatrist
+
+        (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care • use only the transcript, contextual notes, or clinical note as a reference for the information to include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes, or clinical note, you must not state that the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)(Ensure that every section is written in full sentences and paragraphs, capturing all relevant details in a narrative style.)
 
         IMPORTANT: 
-        - Your response MUST be a valid Text/plain format exactly matching this schema
+        - Your response MUST be a valid Text/plain format exactly matching this template
         - Only include information explicitly mentioned in the transcript
         - If information for a field is not mentioned, provide an empty string 
         - Write most sections as FULL PARAGRAPHS with complete sentences
@@ -3351,6 +3140,9 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             system_message = f"""You are a clinical documentation specialist focused on creating concise, accurate follow-up notes for mental health practitioners.
         {preservation_instructions}
         {grammar_instructions}
+        Below is the format you need to follow for report
+        {formatting_instructions}
+        
 
         CRITICAL STYLE INSTRUCTIONS:
         1. Create a concise, well-structured follow-up note using bullet points
@@ -3358,41 +3150,57 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
         3. Be direct and specific when describing symptoms, observations, and plans
         4. Document only information explicitly mentioned in the transcript
         5. Format each section with clear bullet points
-        6. If information for a section is not available, indicate with "Not documented" or similar phrasing
+        6. If information for a section is not available, ignore that section
         7. Use objective, clinical language throughout
-        8. For date, use the date mentioned in the transcript or the current date if none is mentioned
 
         Format your response as a valid TEXT/PLAIN format according to this schema:
-        {{
-        "date": "Date of the follow-up if mentioned, otherwise say 'Not documented'",
-        "presenting_complaints": [
-            "Symptom descriptions, medication adherence, concentration levels as mentioned"
-        ],
-        "mental_status": {{
-            "appearance": "Description of patient's appearance",
-            "behavior": "Description of patient's behavior",
-            "speech": "Description of patient's speech pattern",
-            "mood": "Patient's self-reported mood",
-            "affect": "Clinician's observation of patient's affect",
-            "thoughts": "Description of thought content and process",
-            "perceptions": "Any perceptual disturbances noted",
-            "cognition": "Assessment of cognitive functioning",
-            "insight": "Assessment of patient's insight",
-            "judgment": "Assessment of patient's judgment"
-        }},
-        "risk_assessment": "Assessment of suicidality and homicidality",
-        "diagnosis": [
-            "List of diagnoses mentioned"
-        ],
-        "treatment_plan": "Medication plan, follow-up interval, upcoming tests/procedures",
-        "safety_plan": "Safety recommendations",
-        "additional_notes": "Any other relevant information"
-        }}
+        
+        # FOllow Up Note
+       
+         [Date] # use current day date here if not mentioned
+
+        ## History of Presenting Complaints:
+        • [Symptom 1 description]
+        • [Symptom 2 description]
+        • [Medication adherence]
+        • [Concentration level]
+
+        ## Mental Status Examination:
+        • Appearance: [General appearance]
+        • Behavior: [Behavioral observations]
+        • Speech: [Speech characteristics]
+        • Mood: [Reported mood]
+        • Affect: [Observed affect]
+        • Thoughts: [Thought content]
+        • Perceptions: [Perceptual disturbances]
+        • Cognition: [Cognitive functioning]
+        • Insight: [Level of insight]
+        • Judgment: [Judgment assessment]
+
+        ## Risk Assessment:
+        • [Suicidality and homicidality assessment]
+
+        ## Diagnosis:
+        • [Diagnosis 1]
+        • [Diagnosis 2]
+        • [Diagnosis 3]
+        • [Diagnosis 4]
+
+        ## Treatment Plan:
+        • [Medication plan]
+        • [Follow-up interval]
+        • [Upcoming tests or procedures]
+
+        ## Safety Plan:
+        • [Safety recommendations]
+
+        ## Additional Notes:
+        • [Additional relevant information]
 
         IMPORTANT: 
-        - Your response MUST be a valid TEXT/PLAIN format exactly matching this schema
+        - Your response MUST be a valid TEXT/PLAIN format exactly matching the format
         - Only include information explicitly mentioned in the transcript
-        - If information for a field is not mentioned, provide "Not documented" or "None"
+        - If information for a field is not mentioned, ignore that and dont include it in report
         - Do not invent information not present in the conversation
         - Be DIRECT and CONCISE in all documentation while preserving accuracy
         - Use professional terminology appropriate for mental health settings
@@ -3578,41 +3386,107 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
                 """
 
         elif template_type == "case_formulation":
-                system_message = """You are a mental health professional tasked with creating a concise case formulation report following the 4Ps schema (Predisposing, Precipitating, Perpetuating, and Protective factors). Based on the provided transcript of a clinical session, extract and organize relevant information into the following sections.
+                system_message = """You are a mental health professional tasked with creating a concise case formulation report following the 4Ps schema (Predisposing, Precipitating, Perpetuating, and Protective factors). Based on the provided transcript of a clinical session, extract and organize relevant information into the specified sections. Use only the information explicitly provided in the transcript, and do not include or assume any additional details. Ensure the output is a valid TEXT/PLAIN document formatted professionally in a clinical tone, with no data repetition across sections. Omit any section if no relevant data is provided in the transcript, without placeholders. Convert time references (e.g., 'this morning,' 'last week') to specific dates based on today's date, June 21, 2025 (Saturday). For example, 'this morning' is 21/06/2025; 'last week' is approximately 14/06/2025; 'last Wednesday' is 18/06/2025. Format dates as DD/MM/YYYY. Use bullet points with '•  ' (Unicode bullet point U+2022 followed by two spaces) for each item in all sections.
+                {grammar_instructions} {date_instructions}
+                Below are the instructions to format the report:
+                {formatting_instructions}
 
-        Your response MUST be a valid TEXT/PLAIN format with EXACTLY these keys:
-        - client_goals: The client's expressed goals and aspirations
-        - presenting_problems: The main issues the client is experiencing (string or array of strings)
-        - predisposing_factors: Factors that may have contributed to the development of the presenting issues (string or array of strings)
-        - precipitating_factors: Events or circumstances that triggered the onset of the presenting issues (string or array of strings)
-        - perpetuating_factors: Factors that are maintaining or exacerbating the presenting issues (string or array of strings)
-        - protective_factors: Factors that are helping the client cope with or mitigate the presenting issues (string or array of strings)
-        - problem_list: List of identified problems/issues (string or array of strings)
-        - treatment_goals: Specific goals to be achieved through treatment (string or array of strings)
-        - case_formulation: Comprehensive explanation of the client's issues, incorporating biopsychosocial factors
-        - treatment_mode: Description of the treatment modalities and interventions planned or in use (string or array of strings)
+                Case Formulation Report Template:
 
-        Example response structure:
-        {
-        "client_goals": "The client aims to improve their mental health and manage anxiety",
-        "presenting_problems": ["Depression", "Anxiety", "Panic attacks"],
-        "predisposing_factors": ["Family history of mental health issues"],
-        "precipitating_factors": ["Recent job stress"],
-        "perpetuating_factors": ["Avoidance behaviors"],
-        "protective_factors": ["Supportive spouse"],
-        "problem_list": ["Severe anxiety", "Frequent panic attacks"],
-        "treatment_goals": ["Reduce anxiety", "Improve coping skills"],
-        "case_formulation": "The client presents with anxiety likely influenced by...",
-        "treatment_mode": ["Cognitive-behavioral therapy", "Medication management"]
-        }
+                # Case Formulation
 
-        Use professional clinical language and be concise yet comprehensive. If information for any section is not available in the transcript, use the value "Not documented" for that field."""
-                schema = CASE_FORMULATION_SCHEMA
+                ## CLIENT GOALS:
+                •  [Goals and aspirations of the client, only if mentioned]
+
+                ## PRESENTING PROBLEM/S:
+                •  [Description of the presenting issues, only if mentioned]
+
+                ## PREDISPOSING FACTORS:
+                •  [Factors that may have contributed to the development of the presenting issues, only if mentioned]
+
+                ## PRECIPITATING FACTORS:
+                •  [Events or circumstances that triggered the onset of the presenting issues, only if mentioned]
+
+                ## PERPETUATING FACTORS:
+                •  [Factors that are maintaining or exacerbating the presenting issues, only if mentioned]
+
+                ## PROTECTIVE FACTORS:
+                •  [Factors that are helping the client cope with or mitigate the presenting issues, only if mentioned]
+
+                ## PROBLEM LIST:
+                •  [List of identified problems/issues, only if mentioned]
+
+                ## TREATMENT GOALS:
+                •  [Specific goals to be achieved through treatment, only if mentioned]
+
+                ## CASE FORMULATION:
+                •  [Comprehensive explanation of the client's issues, incorporating biopsychosocial factors, only if sufficient data is mentioned]
+
+                ## TREATMENT MODE/INTERVENTIONS:
+                •  [Description of the treatment modalities and interventions planned or in use, only if mentioned]
+
+                Instructions:
+                - Output a plain-text case formulation report with the specified headings, using bullet points ('•  ') for each item.
+                - Ensure no data is repeated across sections (e.g., a precipitating event should not reappear as a perpetuating factor unless distinctly relevant).
+                - Omit any section entirely if no relevant information is provided in the transcript.
+                - Use professional, concise clinical language suitable for mental health documentation.
+                - Convert all numbers to numeric format (e.g., '5' instead of 'five').
+                - Ensure the report is an efficient clinical tool, summarizing and analyzing the transcript from a mental health perspective.
+
+                Example Transcription:
+                The patient presents reporting increased anxiety and panic attacks since starting a new job on 02/06/2025. They describe feeling overwhelmed and having a panic attack on 18/06/2025. The patient has a family history of anxiety disorders. Work stress is ongoing, with long hours and high expectations. They avoid social situations due to fear of panic attacks. The patient lives with a supportive partner who encourages coping strategies. They aim to manage anxiety better and return to social activities. The clinician plans cognitive-behavioral therapy (CBT) and discusses medication options. The patient reports poor sleep and concentration issues. Treatment goals include reducing panic attack frequency and improving coping skills.
+
+                Example Case Formulation Report Output:
+
+                # Case Formulation
+
+                ## CLIENT GOALS:
+                •  Manage anxiety effectively
+                •  Return to social activities
+
+                ## PRESENTING PROBLEM/S:
+                •  Increased anxiety
+                •  Frequent panic attacks
+
+                ## PREDISPOSING FACTORS:
+                •  Family history of anxiety disorders
+
+                ## PRECIPITATING FACTORS:
+                •  Starting a new job on 02/06/2025
+
+                ## PERPETUATING FACTORS:
+                •  Ongoing work stress with long hours and high expectations
+                •  Avoidance of social situations due to fear of panic attacks
+
+                ## PROTECTIVE FACTORS:
+                •  Supportive partner encouraging coping strategies
+
+                ## PROBLEM LIST:
+                •  Severe anxiety
+                •  Panic attacks
+                •  Poor sleep
+                •  Concentration difficulties
+
+                ## TREATMENT GOALS:
+                •  Reduce frequency of panic attacks
+                •  Improve coping skills for anxiety
+
+                ## CASE FORMULATION:
+                The patient's anxiety and panic attacks are likely influenced by a genetic predisposition, triggered by recent job-related stress, and maintained by avoidance behaviors and ongoing workplace demands. Biopsychosocial factors include family history (biological), work stress (psychological), and social withdrawal (social).
+
+                ## TREATMENT MODE/INTERVENTIONS:
+                •  Cognitive-behavioral therapy (CBT)
+                •  Discuss medication management options
+    """
 
         elif template_type == "discharge_summary":
             system_message = f"""You are a mental health professional documentation expert specializing in comprehensive discharge summaries.
         {preservation_instructions}
         {grammar_instructions}
+        Below is the format how i wanna structure my report:
+        {formatting_instructions}
+        Below are the instructions for date:
+        {date_instructions}
 
         CRITICAL STYLE INSTRUCTIONS:
         1. Write as a professional clinician would write - using appropriate clinical terminology and professional language
@@ -3625,70 +3499,103 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
         8. Use bullet points for lists of goals, progress, strengths, challenges, recommendations, etc.
 
         Format your response as a valid TEXT/PLAIN format according to this schema:
-        {{
-        "client": {{
-            "name": "Client's full name if mentioned",
-            "dob": "Client's date of birth if mentioned",
-            "discharge_date": "Date of discharge if mentioned"
-        }},
-        "referral": {{
-            "source": "Name and contact details of referring individual/agency",
-            "reason": "Brief summary of the reason for referral"
-        }},
-        "presenting_issues": ["Array of presenting issues"],
-        "diagnosis": ["Array of diagnoses"],
-        "treatment_summary": {{
-            "duration": "Start date and end date of therapy",
-            "sessions": "Total number of sessions attended",
-            "therapy_type": "Type of therapy provided (CBT, ACT, etc.)",
-            "goals": ["Array of therapeutic goals"],
-            "description": "Description of treatment provided",
-            "medications": "Any medications prescribed"
-        }},
-        "progress": {{
-            "overall": "Client's overall progress and response to treatment",
-            "goal_progress": ["Array of progress descriptions for each goal"]
-        }},
-        "clinical_observations": {{
-            "engagement": "Client's participation and engagement in therapy",
-            "strengths": ["Array of client's strengths identified during treatment"],
-            "challenges": ["Array of client's challenges identified during treatment"]
-        }},
-        "risk_assessment": "Description of risk factors or concerns identified at discharge",
-        "outcome": {{
-            "current_status": "Summary of client's mental health status at discharge",
-            "remaining_issues": "Any ongoing issues not fully resolved",
-            "client_perspective": "Client's view of their progress and outcomes",
-            "therapist_assessment": "Professional assessment of the outcome"
-        }},
-        "discharge_reason": {{
-            "reason": "Reason for discharge",
-            "client_understanding": "Client's understanding and agreement with discharge plan"
-        }},
-        "discharge_plan": "Outline of discharge plan including follow-up appointments",
-        "recommendations": {{
-            "overall": "Overall recommendations identified",
-            "followup": ["Array of follow-up care recommendations"],
-            "self_care": ["Array of self-care strategies"],
-            "crisis_plan": "Instructions for handling potential crises",
-            "support_systems": "Encouragement to engage with personal support"
-        }},
-        "additional_notes": "Any additional notes relevant to discharge",
-        "final_note": "Therapist's closing remarks",
-        "clinician": {{
-            "name": "Clinician's full name",
-            "date": "Date of document completion"
-        }},
-        "attachments": ["Array of attached documents"]
-        }}
+        
+        # Discharge Summary
 
+        Client Name: [client's full name] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        Date of Birth: [client's date of birth] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        Date of Discharge: [date of discharge] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        ## Referral Information  
+        • Referral Source: [Name and contact details of referring individual/agency] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.) 
+        • Reason for Referral: [Brief summary of the reason for referral] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        ## Presenting Issues:
+        • [describe presenting issues or reasons for seeking psychological services] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        ## Diagnosis:
+        • [list diagnosis or diagnoses] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        ## Treatment Summary:
+        • Duration of Therapy: [Start date and end date of therapy] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.) 
+        • Number of Sessions: [Total number of sessions attended] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.) 
+        • Type of Therapy: [Type of therapy provided, e.g., CBT, ACT, DBT, etc.] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.) 
+        • Therapeutic Goals:  
+            1. [Goal 1]  
+            2. [Goal 2]  
+            3. [Goal 3] (add more as needed)  
+        • [describe the treatment provided, including type of therapy, frequency, and duration] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        • [mention any medications prescribed] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        ## Progress and Response to Treatment:
+        • [describe client's overall progress and response to treatment] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        • Progress Toward Goals:  
+            1. [Goal 1: Progress Description] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.) 
+            2. [Goal 2: Progress Description] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            3. [Goal 3: Progress Description] (add more as needed, and only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        ## Clinical Observations  
+        • Client's Engagement: [Client's participation and engagement in therapy] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.) 
+        • Client's Strengths:  
+        • [mention client's resources identified during treatment] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            1. [Strength 1] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            2.[Strength 2] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            3.[Strength 3] (add more as needed, and only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        • Client's Challenges:  
+            1. [Challenge 1] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            2. [Challenge 2] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            3. [Challenge 3] (add more as needed, and only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        ## Risk Assessment:
+        • [describe any risk factors or concerns identified at discharge] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        ## Outcome of Therapy  
+        • Current Status: [Summary of the client's mental health status at discharge] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        • Remaining Issues: [Any ongoing issues that were not fully resolved] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        • Client’s Perspective: [Client's view of their progress and outcomes] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        • Therapist's Assessment: [Your professional assessment of the outcome] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        ## Reason for Discharge  
+        • Discharge Reason: [Reason for discharge, e.g., completion of treatment, client moved, etc.] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        • Client's Understanding and Agreement: [Client's understanding and agreement with the discharge plan] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        ## Discharge Plan:
+        • [outline the discharge plan, including any follow-up appointments, referrals, or recommendations for continued care] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        ## Recommendations:
+        • [detail overall recommendations identified] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        • Follow-Up Care:  
+            1. [Recommendation 1] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            2. [Recommendation 2] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            3. [Recommendation 3] (add more as needed, and only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        • Self-Care Strategies:  
+            1. [Strategy 1] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            2. [Strategy 2] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            3. [Strategy 3] (add more as needed, and only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        • Crisis Plan: [Instructions for handling potential crises or relapses] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        • Support Systems: [Encouragement to engage with personal support networks] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        ## Additional Notes:
+        • [include any additional notes or comments relevant to the client's discharge] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        ## Final Note  
+        • Therapist’s Closing Remarks: [Any final remarks or reflections on the client’s journey] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        Clinician's Name: [clinician's full name] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        Clinician's Signature: [clinician's signature] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+        Date: [date of document completion] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        Attachments (if any)  
+        - [List of any attached documents, such as final assessment results, referral letters, etc.] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+        (Never come up with your own patient details, assessment, diagnosis, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes or clinical note as a reference for the information include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes or clinical note, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)(Use as many bullet points as needed to capture all the relevant information from the transcript.)
+        
         IMPORTANT:
-        - Your response MUST be a valid TEXT/PLAIN object exactly matching this schema
+        - Your response MUST be a valid TEXT format exactly matching this format
         - Only include information explicitly mentioned in the transcript
         - If information for a field is not mentioned, provide an empty string or empty array
         - Do not invent information not present in the conversation
         - Be DIRECT and CONCISE in all documentation while preserving clinical accuracy
-        - Always use "Client" instead of "Patient" throughout
         """
         
         elif template_type == "h75":
@@ -3698,83 +3605,114 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
                 main_logger.info(f"[OP-{operation_id}] Using current_date from metadata: {current_date}")
             system_message = f"""You are an expert medical report generator tasked with creating a concise ">75 Health Assessment" report for patients aged 75 and older. The report must follow the provided template structure, including only sections and subsections where relevant data is available from the transcription. Omit any section or subsection with no data, without using placeholders. 
             Use a professional, empathetic, and doctor-like tone suitable for healthcare documentation. 
-            Summarize and analyze the transcription to extract pertinent information, ensuring the report is clear, concise, and uses medical terminology. Include time-related information (e.g., symptom duration, follow-up dates) where applicable. Output a valid TEXT/PLAIN object with a 'formatted_report' field containing markdown-formatted content for clarity. Ensure the report is titled '>75 Health Assessment for [Patient Name]' and dated with the provided current_date or '[Date]' if unavailable. Structure the report to assist clinicians by providing a focused summary of the patient's condition from a doctor's perspective.
+            Summarize and analyze the transcription to extract pertinent information, ensuring the report is clear, concise, and uses medical terminology. Include time-related information (e.g., symptom duration, follow-up dates) where applicable. Ensure the report is titled '>75 Health Assessment for [Patient Name]' and dated with the provided current_date or '[Date]' if unavailable. Structure the report to assist clinicians by providing a focused summary of the patient's condition from a doctor's perspective.
             {preservation_instructions} {grammar_instructions} {date_instructions}
+
+        Below is the instructions to format the report:
+        {formatting_instructions}
             """
 
             user_instructions = f"""
         Generate a ">75 Health Assessment" report based on the provided transcription and the following template. 
         Don't add anything that is not part of the conversation. Only surround the report around the stuff talked about in conversation.
         Do not repeat anything
-        Extract and summarize relevant data from the transcription, including only sections and subsections with available information. Omit any section or subsection without data, avoiding placeholders. Use medical terminology, maintain a professional tone, and ensure the report is concise and structured to support clinical decision-making. Include time-related details (e.g., symptom onset, follow-up appointments) where relevant. Format the output as a valid TEXT/PLAIN object with a 'formatted_report' field in markdown, following the template structure below:
+        Extract and summarize relevant data from the transcription, including only sections and subsections with available information. Omit any section or subsection without data, avoiding placeholders. Use medical terminology, maintain a professional tone, and ensure the report is concise and structured to support clinical decision-making. Include time-related details (e.g., symptom onset, follow-up appointments) where relevant. Format the output as a valid Text, following the template structure below:
+        Below is the instructions to format the report:
+        {formatting_instructions}
+
+        {date_instructions}
 
         Template Structure
-        Medical History 
-        - Chronic conditions: [e.g., List diagnosed conditions and management]  
-        - Smoking history: [e.g., Smoking status and history]  
-        - Current presentation: [e.g., Symptoms, vitals, exam findings, diagnosis]  
-        - Medications prescribed: [e.g., List medications and instructions]  
-        - Last specialist, dental, optometry visits recorded: [e.g., Cardiologist - [Date]]  
-        - Latest screening tests noted (BMD, FOBT, CST, mammogram): [e.g., BMD - [Date]]  
-        - Vaccination status updated (flu, COVID-19, pneumococcal, shingles, tetanus): [e.g., Flu - [Date]]  
-        - Sleep quality affected by snoring or daytime somnolence: [e.g., Reports snoring]  
-        - Vision: [e.g., Corrected vision with glasses]  
-        - Presence of urinary and/or bowel incontinence: [e.g., No incontinence reported]  
-        - Falls reported in last 3 months: [e.g., No falls reported]  
-        - Independent with activities of daily living: [e.g., Independent with all ADLs]  
-        - Mobility limits documented: [e.g., Difficulty with stairs]  
-        - Home support and ACAT assessment status confirmed: [e.g., No home support required]  
-        - Advance care planning documents (Will, EPoA, AHD) up to date: [e.g., Will updated [Date]]  
-        - Cognitive function assessed: [e.g., MMSE score 28/30]  
+    
+        # >75 Health Assessment
 
-        Social History
-        - Engagement in hobbies and social activities: [e.g., Enjoys gardening]  
-        - Living arrangements and availability of social supports: [e.g., Lives with family]  
-        - Caregiver roles identified: [e.g., Daughter assists with shopping]  
+        ## Medical History 
+        • Chronic conditions: [e.g., List diagnosed conditions and management]  
+        • Smoking history: [e.g., Smoking status and history]  
+        • Current presentation: [e.g., Symptoms, vitals, exam findings, diagnosis]  
+        • Medications prescribed: [e.g., List medications and instructions]  
+        • Last specialist, dental, optometry visits recorded: [e.g., Cardiologist - [Date]]  
+        • Latest screening tests noted (BMD, FOBT, CST, mammogram): [e.g., BMD - [Date]]  
+        • Vaccination status updated (flu, COVID-19, pneumococcal, shingles, tetanus): [e.g., Flu - [Date]]  
+        • Sleep quality affected by snoring or daytime somnolence: [e.g., Reports snoring]  
+        • Vision: [e.g., Corrected vision with glasses]  
+        • Presence of urinary and/or bowel incontinence: [e.g., No incontinence reported]  
+        • Falls reported in last 3 months: [e.g., No falls reported]  
+        • Independent with activities of daily living: [e.g., Independent with all ADLs]  
+        • Mobility limits documented: [e.g., Difficulty with stairs]  
+        • Home support and ACAT assessment status confirmed: [e.g., No home support required]  
+        • Advance care planning documents (Will, EPoA, AHD) up to date: [e.g., Will updated [Date]]  
+        • Cognitive function assessed: [e.g., MMSE score 28/30]  
+        • Dont add anything that is not mentioned, if no data is available ignore the heading.
 
-        Sleep 
-        - Sleep difficulties or use of sleep aids documented: [e.g., Difficulty falling asleep]  
 
-        Bowel and Bladder Function 
-        - Continence status described: [e.g., Fully continent]  
+        ## Social History
+        • Engagement in hobbies and social activities: [e.g., Enjoys gardening]  
+        • Living arrangements and availability of social supports: [e.g., Lives with family]  
+        • Caregiver roles identified: [e.g., Daughter assists with shopping]  
+        • Dont add anything that is not mentioned, if no data is available ignore the heading.
 
-        Hearing and Vision 
-        - Hearing aid use and comfort noted: [e.g., Uses hearing aids bilaterally]  
-        - Recent audiology appointment recorded: [e.g., Audiology review - [Date]]  
-        - Glasses use and last optometry review noted: [e.g., Wears glasses, last review - [Date]]  
 
-        Home Environment & Safety 
-        - Home access and safety features documented: [e.g., Handrails installed]  
-        - Assistance with cleaning, cooking, gardening reported: [e.g., Hires cleaner biweekly]  
-        - Financial ability to afford food and services addressed: [e.g., Adequate resources]  
+        ## Sleep 
+        • Sleep difficulties or use of sleep aids documented: [e.g., Difficulty falling asleep] 
+        • Dont add anything that is not mentioned, if no data is available ignore the heading.
 
-        Mobility and Physical Function
-        - Ability to bend, kneel, climb stairs, dress, bathe independently: [e.g., Independent with dressing]  
-        - Use of walking aids and quality footwear: [e.g., Uses cane outdoors]  
-        - Exercise or physical activity levels described: [e.g., Walks 30 minutes daily]  
 
-        Nutrition
-        - Breakfast: [e.g., Oatmeal with fruit]  
-        - Lunch: [e.g., Salad with chicken]  
-        - Dinner: [e.g., Grilled fish, vegetables]  
-        - Snacks: [e.g., Yogurt, nuts]  
-        - Dental or swallowing difficulties: [e.g., No dental issues]  
+        ## Bowel and Bladder Function 
+        • Continence status described: [e.g., Fully continent]  
+        • Dont add anything that is not mentioned, if no data is available ignore the heading.
 
-        Transport
-        - Use of transport services or family support for appointments: [e.g., Drives own car]  
 
-        Specialist and Allied Health Visits
-        - Next specialist and allied health appointments planned: [e.g., Cardiologist - [Date]]  
+        ## Hearing and Vision 
+        • Hearing aid use and comfort noted: [e.g., Uses hearing aids bilaterally]  
+        • Recent audiology appointment recorded: [e.g., Audiology review - [Date]]  
+        • Glasses use and last optometry review noted: [e.g., Wears glasses, last review - [Date]]  
+        • Dont add anything that is not mentioned, if no data is available ignore the heading.
 
-        Health Promotion & Planning
-        - Chronic disease prevention and lifestyle advice provided: [e.g., Advised heart-healthy diet]  
-        - Immunisations and screenings reviewed and updated: [e.g., Flu vaccine scheduled]  
-        - Patient health goals and advance care planning discussed: [e.g., Goal to maintain mobility]  
-        - Referrals made as needed (allied health, social support, dental, optometry, audiology): [e.g., Referred to podiatrist]  
-        - Follow-up and recall appointments scheduled: [e.g., Follow-up in 3 months]  
+
+        ## Home Environment & Safety 
+        • Home access and safety features documented: [e.g., Handrails installed]  
+        • Assistance with cleaning, cooking, gardening reported: [e.g., Hires cleaner biweekly]  
+        • Financial ability to afford food and services addressed: [e.g., Adequate resources]  
+        • Dont add anything that is not mentioned, if no data is available ignore the heading.
+
+
+        ## Mobility and Physical Function
+        • Ability to bend, kneel, climb stairs, dress, bathe independently: [e.g., Independent with dressing]  
+        • Use of walking aids and quality footwear: [e.g., Uses cane outdoors]  
+        • Exercise or physical activity levels described: [e.g., Walks 30 minutes daily]  
+        • Dont add anything that is not mentioned, if no data is available ignore the heading.
+
+
+        ## Nutrition
+        • Breakfast: [e.g., Oatmeal with fruit]  
+        • Lunch: [e.g., Salad with chicken]  
+        • Dinner: [e.g., Grilled fish, vegetables]  
+        • Snacks: [e.g., Yogurt, nuts]  
+        • Dental or swallowing difficulties: [e.g., No dental issues]  
+        • Dont add anything that is not mentioned, if no data is available ignore the heading.
+
+
+        ## Transport
+        • Use of transport services or family support for appointments: [e.g., Drives own car]  
+        • Dont add anything that is not mentioned, if no data is available ignore the heading.
+
+
+        ## Specialist and Allied Health Visits
+        • Next specialist and allied health appointments planned: [e.g., Cardiologist - [Date]]  
+        • Dont add anything that is not mentioned, if no data is available ignore the heading.
+
+
+        ## Health Promotion & Planning
+        • Chronic disease prevention and lifestyle advice provided: [e.g., Advised heart-healthy diet]  
+        • Immunisations and screenings reviewed and updated: [e.g., Flu vaccine scheduled]  
+        • Patient health goals and advance care planning discussed: [e.g., Goal to maintain mobility]  
+        • Referrals made as needed (allied health, social support, dental, optometry, audiology): [e.g., Referred to podiatrist]  
+        • Follow-up and recall appointments scheduled: [e.g., Follow-up in 3 months]  
+        • Dont add anything that is not mentioned, if no data is available ignore the heading.
 
         Output Format
-        The output must be a valid TEXT/PLAIN object with fields for 'title', 'date', relevant template sections (e.g., 'Medical History', 'Social History'), and 'formatted_report' containing the markdown-formatted report. Only include sections and subsections with data extracted from the transcription. Use '[Patient Name]' for the patient’s name and the provided current_date or '[Date]' if unavailable.
+        The output must be a valid in Text format. Only include sections and subsections with data extracted from the transcription. Use '[Patient Name]' for the patient’s name and the provided current_date or '[Date]' if unavailable.
         """ 
       
         elif template_type == "new_soap_note":
@@ -4178,7 +4116,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
         - Leave any field blank (empty string) if not explicitly mentioned in the source.
         - make it concise to the point
         - avoid repetition
-        - If some sentence is long split it into multiple points and write "-  " before each line.
+        - If some sentence is long split it into multiple points and write "•  " before each line.
         - Group related complaints (e.g., fatigue and headache due to stress) under a single issue unless the source indicates distinct etiologies.
         - Ensure each point starts with '•  ' and is concise.
 
@@ -4203,7 +4141,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
         - Do not assume normal findings or include planned investigations (these belong in "assessment_and_plan").
         - make it concise to the point
         - avoid repetition
-        - If some sentence is long split it into multiple points and write "-  " before each line.
+        - If some sentence is long split it into multiple points and write "•  " before each line.
         - Ensure each point starts with '•  ' and is concise.
         - Include the subheading too
 
@@ -4413,6 +4351,9 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             If data for any field is not available dont write anything under that heading and ignore it.
             Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
             Below is the transcript:\n\n{conversation_text}
+            
+            Below is the instructions to format the report:
+            {formatting_instructions}
             """
             system_message = f"""You are a medical documentation assistant tasked with generating a detailed and structured cardiac assessment report based on a predefined template. 
             Your output must maintain a professional, concise, and doctor-like tone, avoiding verbose or redundant phrasing. 
@@ -4420,6 +4361,8 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             If information for a specific section or placeholder is unavailable, use "None known" for risk factors, medical history, medications, allergies, social history, and investigations, or omit the placeholder entirely for other sections as specified. 
             Do not invent or infer patient details, assessments, plans, interventions, or follow-up care beyond what is explicitly stated. 
             If data for any field is not available dont write anything under that heading and ignore it.
+            Below is the instructions to format the report:
+            {formatting_instructions}
            
             Date Handling Instructions:
                 Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
@@ -4433,111 +4376,113 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             {preservation_instructions} {grammar_instructions}
             Follow the structured guidelines below for each section of the report:
 
-            1. Patient Introduction:
-            - Begin the report with: "I had the pleasure of seeing [patient name] today. [patient pronoun] is a pleasant [patient age] year old [patient gender] that was referred for cardiac assessment."
-            - Insert patient name, pronoun (e.g., He/She/They), age, and gender exactly as provided in the transcript or context. If any detail is missing, leave the placeholder blank and proceed.
+            # Cardiology Letter
 
-            2. Cardiac Risk Factors:
-            - List under the heading "CARDIAC RISK FACTORS" in the following order: Increased BMI, Hypertension, Dyslipidemia, Diabetes mellitus, Smoker, Ex-smoker, Family history of atherosclerotic disease in first-degree relatives.
-            - For each risk factor, use verbatim text from contextual notes if available, updating only with new or differing information from the transcript.
-            - If no information is provided in the transcript or context, write "None known" for each risk factor.
-            - For Smoker, include pack-years, years smoked, and number of cigarettes or packs per day if mentioned in the transcript or context.
-            - For Ex-smoker, include only if the patient is not currently smoking. State the year quit and whether they quit remotely (e.g., "quit remotely in 2015") if mentioned. Omit this section if the patient is a current smoker.
-            - For Family history of atherosclerotic disease, specify if the patient’s mother, father, sister, brother, or child had a myocardial infarction, coronary angioplasty, coronary stenting, coronary bypass, peripheral arterial procedure, or stroke prior to age 55 (men) or 65 (women), as mentioned in the transcript or context.
+            ## Patient Introduction:
+            • Begin the report with: "I had the pleasure of seeing [patient name] today. [patient pronoun] is a pleasant [patient age] year old [patient gender] that was referred for cardiac assessment."
+            • Insert patient name, pronoun (e.g., He/She/They), age, and gender exactly as provided in the transcript or context. If any detail is missing, leave the placeholder blank and proceed.
 
-            3. Cardiac History:
-            - List under the heading "CARDIAC HISTORY" all cardiac diagnoses in the following order, if mentioned: heart failure (HFpEF or HFrEF), cardiomyopathy, arrhythmias (atrial fibrillation, atrial flutter, SVT, VT, AV block, heart block), devices (pacemakers, ICDs), valvular disease, endocarditis, pericarditis, tamponade, myocarditis, coronary disease.
-            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
-            - For heart failure, specify HFpEF or HFrEF and include ICD implantation details (date and model) if mentioned.
-            - For arrhythmias, include history of cardioversions and ablations (type and date) if mentioned.
-            - For AV block, heart block, or syncope, state if a pacemaker was implanted, including type, model, and date, if mentioned.
-            - For valvular heart disease, note the type of intervention (e.g., valve replacement) and date if mentioned.
-            - For coronary disease, summarize previous angiograms, coronary anatomy, and interventions (angioplasty, stenting, CABG) with graft details and dates if mentioned.
-            - Omit this section entirely if no cardiac history is mentioned in the transcript or context.
+            ## Cardiac Risk Factors:
+            • List under the heading "CARDIAC RISK FACTORS" in the following order: Increased BMI, Hypertension, Dyslipidemia, Diabetes mellitus, Smoker, Ex-smoker, Family history of atherosclerotic disease in first-degree relatives.
+            • For each risk factor, use verbatim text from contextual notes if available, updating only with new or differing information from the transcript.
+            • If no information is provided in the transcript or context, write "None known" for each risk factor.
+            • For Smoker, include pack-years, years smoked, and number of cigarettes or packs per day if mentioned in the transcript or context.
+            • For Ex-smoker, include only if the patient is not currently smoking. State the year quit and whether they quit remotely (e.g., "quit remotely in 2015") if mentioned. Omit this section if the patient is a current smoker.
+            • For Family history of atherosclerotic disease, specify if the patient’s mother, father, sister, brother, or child had a myocardial infarction, coronary angioplasty, coronary stenting, coronary bypass, peripheral arterial procedure, or stroke prior to age 55 (men) or 65 (women), as mentioned in the transcript or context.
 
-            4. Other Medical History:
-            - List under the heading "OTHER MEDICAL HISTORY" all non-cardiac diagnoses and previous surgeries with associated years if mentioned.
-            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
-            - Write "None known" if no non-cardiac medical history is mentioned in the transcript or context.
+            ## Cardiac History:
+            • List under the heading "CARDIAC HISTORY" all cardiac diagnoses in the following order, if mentioned: heart failure (HFpEF or HFrEF), cardiomyopathy, arrhythmias (atrial fibrillation, atrial flutter, SVT, VT, AV block, heart block), devices (pacemakers, ICDs), valvular disease, endocarditis, pericarditis, tamponade, myocarditis, coronary disease.
+            • Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            • For heart failure, specify HFpEF or HFrEF and include ICD implantation details (date and model) if mentioned.
+            • For arrhythmias, include history of cardioversions and ablations (type and date) if mentioned.
+            • For AV block, heart block, or syncope, state if a pacemaker was implanted, including type, model, and date, if mentioned.
+            • For valvular heart disease, note the type of intervention (e.g., valve replacement) and date if mentioned.
+            • For coronary disease, summarize previous angiograms, coronary anatomy, and interventions (angioplasty, stenting, CABG) with graft details and dates if mentioned.
+            • Omit this section entirely if no cardiac history is mentioned in the transcript or context.
 
-            5. Current Medications:
-            - List under the heading "CURRENT MEDICATIONS" in the following subcategories, each on a single line:
-                - Antithrombotic Therapy: Include aspirin, clopidogrel, ticagrelor, prasugrel, apixaban, rivaroxaban, dabigatran, edoxaban, warfarin.
-                - Antihypertensives: Include ACE inhibitors, ARBs, beta blockers, calcium channel blockers, alpha blockers, nitrates, diuretics (excluding furosemide, e.g., HCTZ, chlorthalidone, indapamide).
-                - Heart Failure Medications: Include Entresto, SGLT2 inhibitors, mineralocorticoid receptor antagonists, furosemide, metolazone, ivabradine.
-                - Lipid Lowering Medications: Include statins, ezetimibe, PCSK9 modifiers, fibrates, icosapent ethyl.
-                - Other Medications: Include any medications not listed above.
-            - For each medication, include dose, frequency, and administration if mentioned, and note the typical recommended dosage per tablet or capsule in parentheses if it differs from the patient’s dose.
-            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
-            - Write "None known" for each subcategory if no medications are mentioned.
+            ## Other Medical History:
+            • List under the heading "OTHER MEDICAL HISTORY" all non-cardiac diagnoses and previous surgeries with associated years if mentioned.
+            • Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            • Write "None known" if no non-cardiac medical history is mentioned in the transcript or context.
 
-            6. Allergies and Intolerances:
-            - List under the heading "ALLERGIES AND INTOLERANCES" in sentence format, separated by commas, with reactions in parentheses if mentioned (e.g., "penicillin (rash), sulfa drugs (hives)").
-            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
-            - Write "None known" if no allergies or intolerances are mentioned.
+            ## Current Medications:
+            • List under the heading "CURRENT MEDICATIONS" in the following subcategories, each on a single line:
+                • Antithrombotic Therapy: Include aspirin, clopidogrel, ticagrelor, prasugrel, apixaban, rivaroxaban, dabigatran, edoxaban, warfarin.
+                • Antihypertensives: Include ACE inhibitors, ARBs, beta blockers, calcium channel blockers, alpha blockers, nitrates, diuretics (excluding furosemide, e.g., HCTZ, chlorthalidone, indapamide).
+                • Heart Failure Medications: Include Entresto, SGLT2 inhibitors, mineralocorticoid receptor antagonists, furosemide, metolazone, ivabradine.
+                • Lipid Lowering Medications: Include statins, ezetimibe, PCSK9 modifiers, fibrates, icosapent ethyl.
+                • Other Medications: Include any medications not listed above.
+            • For each medication, include dose, frequency, and administration if mentioned, and note the typical recommended dosage per tablet or capsule in parentheses if it differs from the patient’s dose.
+            • Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            • Write "None known" for each subcategory if no medications are mentioned.
 
-            7. Social History:
-            - List under the heading "SOCIAL HISTORY" in a short-paragraph narrative form.
-            - Include living situation, spousal arrangements, number of children, working arrangements, retirement status, smoking status, alcohol use, illicit or recreational drug use, and private drug/health plan status, if mentioned.
-            - For smoking, write "Smoking history as above" if the patient smokes or is an ex-smoker; otherwise, write "Non-smoker."
-            - For alcohol, specify the number of drinks per day or week if mentioned.
-            - Include comments on activities of daily living (ADLs) and instrumental activities of daily living (IADLs) if relevant.
-            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
-            - Write "None known" if no social history is mentioned.
+            ## Allergies and Intolerances:
+            • List under the heading "ALLERGIES AND INTOLERANCES" in sentence format, separated by commas, with reactions in parentheses if mentioned (e.g., "penicillin (rash), sulfa drugs (hives)").
+            • Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            • Write "None known" if no allergies or intolerances are mentioned.
 
-            8. History:
-            - List under the heading "HISTORY" in narrative paragraph form, detailing all reasons for the current visit, chief complaints, and a comprehensive history of presenting illness.
-            - Include mentioned negatives from exams and symptoms, as well as details on physical activities and exercise regimens, if mentioned.
-            - Only include information explicitly stated in the transcript or context.
-            - End with: "Review of systems is otherwise non-contributory."
+            ## Social History:
+            • List under the heading "SOCIAL HISTORY" in a short-paragraph narrative form.
+            • Include living situation, spousal arrangements, number of children, working arrangements, retirement status, smoking status, alcohol use, illicit or recreational drug use, and private drug/health plan status, if mentioned.
+            • For smoking, write "Smoking history as above" if the patient smokes or is an ex-smoker; otherwise, write "Non-smoker."
+            • For alcohol, specify the number of drinks per day or week if mentioned.
+            • Include comments on activities of daily living (ADLs) and instrumental activities of daily living (IADLs) if relevant.
+            • Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            • Write "None known" if no social history is mentioned.
 
-            9. Physical Examination:
-            - List under the heading "PHYSICAL EXAMINATION" in a short-paragraph narrative form.
-            - Include vital signs (blood pressure, heart rate, oxygen saturation), cardiac examination, respiratory examination, peripheral edema, and other exam insights only if explicitly mentioned in the transcript or context.
-            - If cardiac exam is not mentioned or normal, write: "Precordial examination was unremarkable with no significant heaves, thrills or pulsations. Heart sounds were normal with no significant murmurs, rubs, or gallops."
-            - If respiratory exam is not mentioned or normal, write: "Chest was clear to auscultation."
-            - If peripheral edema is not mentioned or normal, write: "No peripheral edema."
-            - Omit other physical exam insights if not mentioned.
+            ## History:
+            • List under the heading "HISTORY" in narrative paragraph form, detailing all reasons for the current visit, chief complaints, and a comprehensive history of presenting illness.
+            • Include mentioned negatives from exams and symptoms, as well as details on physical activities and exercise regimens, if mentioned.
+            • Only include information explicitly stated in the transcript or context.
+            • End with: "Review of systems is otherwise non-contributory."
 
-            10. Investigations:
-                - List under the heading "INVESTIGATIONS" in the following subcategories, each on a single line with findings and dates in parentheses followed by a colon:
-                - Laboratory investigations: List CBC, electrolytes, creatinine with GFR, troponins, NTpBNP or BNP level, A1c, lipids, and other labs in that order, if mentioned.
-                - ECGs: List ECG findings and dates.
-                - Echocardiograms: List echocardiogram findings and dates.
-                - Stress tests: List stress test findings (including stress echocardiograms and graded exercise challenges) and dates.
-                - Holter monitors: List Holter monitor findings and dates.
-                - Device interrogations: List device interrogation findings and dates.
-                - Cardiac perfusion imaging: List cardiac perfusion imaging findings and dates.
-                - Cardiac CT: List cardiac CT findings and dates.
-                - Cardiac MRI: List cardiac MRI findings and dates.
-                - Other investigations: List other relevant investigations and dates.
-                - Use verbatim text from contextual notes, updating only with new or differing transcript information.
-                - Write "None known" for each subcategory if no findings are mentioned.
+            ## Physical Examination:
+            • List under the heading "PHYSICAL EXAMINATION" in a short-paragraph narrative form.
+            • Include vital signs (blood pressure, heart rate, oxygen saturation), cardiac examination, respiratory examination, peripheral edema, and other exam insights only if explicitly mentioned in the transcript or context.
+            • If cardiac exam is not mentioned or normal, write: "Precordial examination was unremarkable with no significant heaves, thrills or pulsations. Heart sounds were normal with no significant murmurs, rubs, or gallops."
+            • If respiratory exam is not mentioned or normal, write: "Chest was clear to auscultation."
+            • If peripheral edema is not mentioned or normal, write: "No peripheral edema."
+            • Omit other physical exam insights if not mentioned.
 
-            11. Summary:
-                - List under the heading "SUMMARY" in a cohesive narrative paragraph.
-                - Start with: "[patient name] is a pleasant [age] year old [gender] that was seen today for cardiac assessment."
-                - Include: "Cardiac risk factors include [list risk factors]" if mentioned in the transcript or context.
-                - Summarize patient symptoms from the History section and cardiac investigations from the Investigations section, if mentioned.
-                - Omit risk factors or summary details if not mentioned.
+            ## Investigations:
+            • List under the heading "INVESTIGATIONS" in the following subcategories, each on a single line with findings and dates in parentheses followed by a colon:
+            • Laboratory investigations: List CBC, electrolytes, creatinine with GFR, troponins, NTpBNP or BNP level, A1c, lipids, and other labs in that order, if mentioned.
+            • ECGs: List ECG findings and dates.
+            • Echocardiograms: List echocardiogram findings and dates.
+            • Stress tests: List stress test findings (including stress echocardiograms and graded exercise challenges) and dates.
+            • Holter monitors: List Holter monitor findings and dates.
+            • Device interrogations: List device interrogation findings and dates.
+            • Cardiac perfusion imaging: List cardiac perfusion imaging findings and dates.
+            • Cardiac CT: List cardiac CT findings and dates.
+            • Cardiac MRI: List cardiac MRI findings and dates.
+            • Other investigations: List other relevant investigations and dates.
+            • Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            • Ignore if no findings are mentioned.
 
-            12. Assessment/Plan:
-                - List under the heading "ASSESSMENT/PLAN" for each medical issue, structured as:
-                - #[number] [Condition]
-                - Assessment: [Current assessment of the condition, drawn from context and transcript]
-                - Plan: [Management plan, including investigations, follow-up, and reasoning for the plan, drawn from context and transcript. Include counselling details if mentioned.]
-                - Number each issue sequentially (e.g., #1, #2) and ensure all information is explicitly mentioned in the transcript or context.
+            ## Summary:
+            • List under the heading "SUMMARY" in a cohesive narrative paragraph.
+            • Start with: "[patient name] is a pleasant [age] year old [gender] that was seen today for cardiac assessment."
+            • Include: "Cardiac risk factors include [list risk factors]" if mentioned in the transcript or context.
+            • Summarize patient symptoms from the History section and cardiac investigations from the Investigations section, if mentioned.
+            • Omit risk factors or summary details if not mentioned.
 
-            13. Follow-Up:
-                - List under the heading "FOLLOW-UP" any follow-up plans and time frames explicitly mentioned in the transcript.
-                - If no time frame is specified, write: "Will follow-up in due course, pending investigations, or sooner should the need arise."
+            ## Assessment/Plan:
+            • List under the heading "ASSESSMENT/PLAN" for each medical issue, structured as:
+            • [number.] [Condition]
+            • Assessment: [Current assessment of the condition, drawn from context and transcript]
+            • Plan: [Management plan, including investigations, follow-up, and reasoning for the plan, drawn from context and transcript. Include counselling details if mentioned.]
+            • Number each issue sequentially (e.g., 1., 2.) and ensure all information is explicitly mentioned in the transcript or context.
 
-            14. Closing:
-                - End the report with: "Thank you for the privilege of allowing me to participate in [patient’s name] care. Feel free to reach out directly if any questions or concerns."
+            ## Follow-Up:
+            • List under the heading "FOLLOW-UP" any follow-up plans and time frames explicitly mentioned in the transcript.
+            • If no time frame is specified, write: "Will follow-up in due course, pending investigations, or sooner should the need arise."
+
+            ## Closing:
+            • End the report with: "Thank you for the privilege of allowing me to participate in [patient’s name] care. Feel free to reach out directly if any questions or concerns."
 
             Additional Instructions:
             - Ensure strict adherence to the template structure, maintaining the exact order and headings as specified.
-            - Use "-  " only where indicated (e.g., Assessment/Plan).
+            - Use "•  " only where indicated (e.g., Assessment/Plan).
             - Write in complete sentences for narrative sections (History, Social History, Physical Examination, Summary).
             - If data for any field is not available dont write anything under that heading and ignore it.
             - Ensure all sections are populated only with explicitly provided data, preserving accuracy and professionalism.
@@ -4551,6 +4496,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             You are an expert medical documentation assistant. When summarizing conversations, do not use speaker labels like 'Speaker 0' or 'Speaker 1'. Instead, refer to participants by their roles (e.g., doctor/clinician and patient) based on context, or simply summarize the key medical information without attributing statements to specific speakers.
             {date_instructions}
             """
+
         # Make the API request to GPT - Remove the response_format parameter which is causing the error
         user_prompt = (
             user_instructions
@@ -4558,7 +4504,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
                 "h75", "new_soap_note", "mental_health_appointment", "clinical_report",
                 "cardiology_letter", "detailed_soap_note", "soap_issues", "consult_note", "referral_letter","summary"
             ]
-            else f"Here is a medical conversation. Please format it into a structured {template_type}:\n\n{conversation_text}"
+            else f"Here is a medical conversation. Please format it into a structured {template_type}:\n\n{conversation_text}\nBelow is the instructions to format the report:\n{formatting_instructions}\nBelow is the date instructions {date_instructions}"
         )
 
         return user_prompt, system_message
@@ -4928,1081 +4874,12 @@ async def search_data(
         error_logger.error(f"Error searching data: {str(e)}", exc_info=True)
         return JSONResponse({"error": f"Failed to search data: {str(e)}"}, status_code=500)
 
-async def format_dietician_assessment(gpt_response):
-    """
-    Format a detailed dietician initial assessment from GPT structured response.
-    
-    Args:
-        gpt_response: Dictionary containing the structured dietician assessment data
-        
-    Returns:
-        Formatted string containing the human-readable dietician assessment
-    """
-    try:
-        report = []
-        # Title
-        report.append("# DETAILED DIETICIAN INITIAL ASSESSMENT\n")
-        
-        # Weight History
-        weight_history = gpt_response.get("weight_history")
-        if weight_history and weight_history != "Not discussed":
-            report.append("##Weight History")
-            report.append(weight_history)
-            report.append("")
-        else:
-            report.append("## Weight History")
-            report.append("Weight History was not discussed in the initial assessment.")
-            report.append("")
-
-        # Consolidated Disordered Eating/Eating Disorder Behavior and Nutrition Intake
-        disordered_eating_behavior = gpt_response.get("dietary_habits")
-        if disordered_eating_behavior and disordered_eating_behavior != "Not discussed":
-            report.append("## Disordered Eating/Eating Disorder Behavior and Nutrition Intake")
-            report.append(disordered_eating_behavior)
-            report.append("")
-        else:
-            report.append("## Disordered Eating/Eating Disorder Behavior and Nutrition Intake")
-            report.append("Disordered Eating/Eating Disorder Behavior and Nutrition Intake were not discussed in the initial assessment.")
-            report.append("")
-
-        # Physical Activity Behavior
-        physical_activity = gpt_response.get("physical_activity")
-        if physical_activity and physical_activity != "Not discussed":
-            report.append("## Physical Activity Behavior")
-            report.append(physical_activity)
-            report.append("")
-        else:
-            report.append("## Physical Activity Behavior")
-            report.append("Physical Activity Behavior was not discussed in the initial assessment.")
-            report.append("")
-
-        # Medical & Psychiatric History
-        medical_history = gpt_response.get("medical_history")
-        if medical_history and medical_history != "Not discussed":
-            report.append("## Medical & Psychiatric History")
-            report.append(medical_history)
-            report.append("")
-        else:
-            report.append("## Medical & Psychiatric History")
-            report.append("Medical & Psychiatric History was not discussed in the initial assessment.")
-            report.append("")
-
-        # Medications/Supplements
-        medications = gpt_response.get("medications")
-        supplements = gpt_response.get("supplements")
-        if (medications and medications != "Not discussed") or (supplements and supplements != "Not discussed"):
-            report.append("## Medications/Supplements")
-            if medications:
-                report.append(f"Medications: {medications}")
-            if supplements:
-                report.append(f"Supplements: {supplements}")
-            report.append("")
-        else:
-            report.append("## Medications/Supplements")
-            report.append("Medications/Supplements were not discussed in the initial assessment.")
-            report.append("")
-
-        # Social History/Lifestyle
-        social_history = gpt_response.get("goals")
-        if social_history and social_history != "Not discussed":
-            report.append("## Social History/Lifestyle")
-            report.append(social_history)
-            report.append("")
-        else:
-            report.append("## Social History/Lifestyle")
-            report.append("Social History/Lifestyle was not discussed in the initial assessment.")
-            report.append("")
-        
-        return "\n".join(report)
-    except Exception as e:
-        error_logger.error(f"Error formatting dietician assessment: {str(e)}", exc_info=True)
-        return f"Error formatting dietician assessment: {str(e)}"
-
-async def format_consult_note(gpt_response):
-    """
-    Format a consultation note from a structured GPT response.
-    
-    Args:
-        gpt_response: Dictionary containing the structured consultation note data
-        
-    Returns:
-        Formatted string containing the human-readable consultation note
-    """
-    try:
-        note = []
-        
-        # Add heading
-        note.append("# CONSULTATION NOTE\n")
-
-        # CONSULTATION TYPE
-        if gpt_response.get("Consultation Type"):
-            note.append("## CONSULTATION TYPE")
-            for item in gpt_response["Consultation Type"]:
-                note.append(item)
-            note.append("")
-        
-        # HISTORY
-        if gpt_response.get("History"):
-            note.append("## HISTORY")
-            history = gpt_response["History"]
-            
-            if isinstance(history, list):
-                # Handle History as a list of strings
-                for item in history:
-                    if item.strip():  # Skip empty items
-                        note.append(item)
-                note.append("")
-            
-            elif isinstance(history, dict):
-                # Handle History as a dictionary with sub-sections
-                # History of Presenting Complaints
-                if history.get("History of Presenting Complaints"):
-                    for item in history["History of Presenting Complaints"]:
-                        note.append(item)
-                    note.append("")
-                # PMH/PSH
-                if history.get("ICE"):
-                    ice_items = [item[2:].strip() for item in history["ICE"]]  # Remove "- " prefix
-                    note.append(f"- ICE: {', '.join(ice_items)}")
-                    note.append("")
-                
-                # Relevant Risk Factors
-                if history.get("Relevant Risk Factors"):
-                    for item in history["Relevant Risk Factors"]:
-                        note.append(item)
-                    note.append("")
-            
-                # PMH/PSH
-                if history.get("PMH/PSH"):
-                    pmh_psh_items = [item[2:].strip() for item in history["PMH/PSH"]]  # Remove "- " prefix
-                    note.append(f"- PMH/PSH: {', '.join(pmh_psh_items)}")
-                    note.append("")
-
-                # DH
-                dh_items = []
-                if history.get("DH"):
-                    dh_items= [item[2:].strip() for item in history["DH"]]
-                if history.get("DH/Allergies"):
-                    dh_items= [item[2:].strip() for item in history["DH/Allergies"]]
-                if dh_items:
-                    note.append(f"- DH/Allergies: {', '.join(dh_items)}")
-                    note.append("")
-
-                # FH
-                if history.get("FH"):
-                    fh_items = [item[2:].strip() for item in history["FH"]]  # Remove "- " prefix
-                    note.append(f"- FH: {', '.join(fh_items)}")
-                    note.append("")
-                
-
-                # SH
-                if history.get("SH"):
-                    sh_items = [item[2:].strip() for item in history["SH"]]  # Remove "- " prefix
-                    note.append(f"- sH: {', '.join(sh_items)}")
-                    note.append("")
-
-        if gpt_response.get("Examination"):
-            note.append("## EXAMINATION")
-            exam = gpt_response["Examination"]
-            
-            if isinstance(exam, list):
-                # Handle History as a list of strings
-                for item in exam:
-                    if item.strip():  # Skip empty items
-                        note.append(item)
-                note.append("")
-            
-            elif isinstance(exam, dict):
-        
-                if exam.get("Vital Signs"):
-                    vital_items = [item[2:].strip() for item in exam["Vital Signs"]]  # Remove "- " prefix
-                    note.append(f"- Vital Signs: {', '.join(vital_items)}")
-
-                # "Physical/Mental State Examination Findings
-                if exam.get("Physical/Mental State Examination Findings"):
-                    for item in exam["Physical/Mental State Examination Findings"]:
-                        note.append(item)
-                    note.append("")
-                
-
-                # if exam.get("Physical/Mental State Examination Findings"):
-                #     phs_items = [item[2:].strip() for item in exam["Physical/Mental State Examination Findings"]]  # Remove "- " prefix
-                #     note.append(f"- {', '.join(phs_items)}")
-                #     note.append("")
-                
-                # Investigations with Results
-                if exam.get("Investigations with Results"):
-                    for item in exam["Investigations with Results"]:
-                        note.append(item)
-                    note.append("")
-                # if exam.get("Investigations with Results"):
-                #     iwr_items = [item[2:].strip() for item in exam["Investigations with Results"]]  # Remove "- " prefix
-                #     note.append(f"- {', '.join(iwr_items)}")
-                #     note.append("")
-
-        # IMPRESSION
-        if gpt_response.get("Impression"):
-            note.append("## IMPRESSION")
-            for item in gpt_response["Impression"]:
-                # Handle non-bulleted impression statement
-                if not item.startswith("-"):
-                    note.append(item)
-                else:
-                    note.append(item)
-            note.append("")
-        
-        # PLAN
-        if gpt_response.get("Plan"):
-            # Check if Plan is a dictionary (nested with sub-headings) or a list (flat)
-            plan = gpt_response["Plan"]
-            has_valid_content = False
-            
-            if isinstance(plan, dict):
-                # Handle nested Plan with sub-headings
-                valid_subheadings = []
-                for subheading, values in plan.items():
-                    # Ensure values is a list and not empty
-                    if isinstance(values, list) and values and any(v.strip() for v in values if v):
-                        valid_subheadings.append((subheading, values))
-                    elif isinstance(values, str) and values.strip():
-                        valid_subheadings.append((subheading, [f"- {values}"]))
-                
-                if valid_subheadings:
-                    has_valid_content = True
-                    note.append("## PLAN")
-                    for subheading, values in valid_subheadings:
-                        note.append(f"{subheading}: ")
-                        for value in values:
-                            note.append(value)
-                        note.append("")
-            
-            elif isinstance(plan, list) and any(item.strip() for item in plan if item):
-                # Handle flat Plan list (as in provided gpt_response)
-                has_valid_content = True
-                note.append("## PLAN")
-                for item in plan:
-                    note.append(item)
-                note.append("")
-            
-            # If no valid content, Plan section is not added
-            if not has_valid_content:
-                pass  # Skip adding Plan section
-        
-        return "\n".join(note)
-    except Exception as e:
-        error_logger.error(f"Error formatting consultation note: {str(e)}", exc_info=True)
-        return f"Error formatting consultation note: {str(e)}"
-
-async def format_referral_letter(gpt_response):
-    """
-    Format a referral letter from GPT structured response based on the specified referral letter template.
-    
-    Args:
-        gpt_response: Dictionary containing the structured referral letter data
-        
-    Returns:
-        Formatted string containing the human-readable referral letter
-    """
-    try:
-        report = []
-
-        # Add heading
-        report.append("# REFERRAL LETTER\n")
-        
-        # Practice Letterhead
-        letterhead = gpt_response.get("Practice Letterhead", "")
-        if letterhead:
-            report.append(letterhead)
-        
-        # Date
-        date = gpt_response.get("Date", "")
-        if date:
-            report.append(date)
-        report.append("")
-        
-        # To Section
-        consultant_name = gpt_response.get("Consultant’s Name", "")
-        clinic_name = gpt_response.get("Specialist Clinic/Hospital Name", "")
-        address_line_1 = gpt_response.get("Address Line 1", "")
-        address_line_2 = gpt_response.get("Address Line 2", "")
-        city_postcode = gpt_response.get("City, Postcode", "")
-        if consultant_name or clinic_name or address_line_1 or address_line_2 or city_postcode:
-            report.append("To:")
-            if consultant_name:
-                report.append(consultant_name)
-            if clinic_name:
-                report.append(clinic_name)
-            if address_line_1:
-                report.append(address_line_1)
-            if address_line_2:
-                report.append(address_line_2)
-            if city_postcode:
-                report.append(city_postcode)
-            report.append("")
-        
-        # Salutation
-        salutation = gpt_response.get("Salutation", "Dear Specialist,").lstrip("- ").strip()
-        report.append(f"{salutation}")
-        report.append("")
-        
-        # Re Line
-        re_line = gpt_response.get("Re", "").lstrip("- ").strip()
-        if re_line:
-            report.append(f"Re: {re_line}")
-            report.append("")
-        
-        # Introduction
-        introduction = gpt_response.get("Introduction", "").lstrip("- ").strip()
-        if introduction:
-            report.append(introduction)
-            report.append("")
-        
-        # Clinical Details Section
-        clinical_details = gpt_response.get("Clinical Details", {})
-        clinical_details_text = []
-        if isinstance(clinical_details, str):
-            # If clinical_details is a string, append it directly
-            clinical_details_text.append(clinical_details.lstrip("- ").strip())
-        elif isinstance(clinical_details, dict):
-            # If clinical_details is a dictionary, process fields as before
-            for field in ["Presenting Complaint", "Duration", "Relevant Findings", "Past Medical History", "Current Medications"]:
-                if field in clinical_details and clinical_details[field]:
-                    value = clinical_details[field]
-                    if isinstance(value, list):
-                        clinical_details_text.append(" ".join(item.lstrip("- ").strip() for item in value if item))
-                    else:
-                        clinical_details_text.append(value.lstrip("- ").strip())
-        if clinical_details_text:
-            report.append("Clinical Details:")
-            report.extend(clinical_details_text)
-            report.append("")
-        
-        # Investigations Section
-        investigations = gpt_response.get("Investigations", {})
-        investigations_text = []
-        if isinstance(investigations, str):
-            # If investigations is a string, append it directly
-            investigations_text.append(investigations.lstrip("- ").strip())
-        elif isinstance(investigations, dict):
-            # If investigations is a dictionary, process fields as before
-            for field in ["Recent Tests", "Results"]:
-                if field in investigations and investigations[field]:
-                    value = investigations[field]
-                    if isinstance(value, list):
-                        investigations_text.append(" ".join(item.lstrip("- ").strip() for item in value if item))
-                    else:
-                        investigations_text.append(value.lstrip("- ").strip())
-        if investigations_text:
-            report.append("Investigations:")
-            report.extend(investigations_text)
-            report.append("")
-        
-        # Reason for Referral
-        reason = gpt_response.get("Reason for Referral", "").lstrip("- ").strip()
-        if reason:
-            report.append("Reason for Referral:")
-            report.append(reason)
-            report.append("")
-        
-        # Patient’s Contact Information
-        contact_info = gpt_response.get("Patient’s Contact Information", "")
-        if contact_info:
-            report.append("Patient’s Contact Information:")
-            report.append(contact_info)
-            report.append("")
-        
-        # Enclosures
-        enclosures = gpt_response.get("Enclosures", "").lstrip("- ").strip()
-        if enclosures:
-            report.append(enclosures)
-            report.append("")
-        
-        # Closing
-        closing = gpt_response.get("Closing", "").lstrip("- ").strip()
-        if closing:
-            report.append(closing)
-            report.append("")
-        
-        # Signature Section
-        signature = gpt_response.get("Signature", "")
-        title = gpt_response.get("Your Title", "")
-        contact = gpt_response.get("Your Contact Information", "")
-        practice_name = gpt_response.get("Your Practice Name", "")
-        report.append("Yours sincerely,")
-        report.append("")
-        if signature:
-            report.append(signature)
-        if title:
-            report.append(title)
-        if contact:
-            report.append(contact)
-        if practice_name:
-            report.append(practice_name)
-        
-        return "\n".join(report)
-    except Exception as e:
-        error_logger.error(f"Error formatting referral letter: {str(e)}", exc_info=True)
-        return f"Error formatting referral letter: {str(e)}"
-    
-# Add or update the format_psychology_session_notes function
-async def format_psychology_session_notes(gpt_response):
-    """
-    Format psychology session notes from GPT structured response.
-    
-    Args:
-        gpt_response: Dictionary containing the structured psychology session notes data
-        
-    Returns:
-        Formatted string containing the human-readable psychology session notes
-    """
-    try:
-        notes = []
-        
-        # Add heading
-        notes.append("# PSYCHOLOGY SESSION NOTES\n")
-        
-        # OUT OF SESSION TASK REVIEW
-        notes.append("## OUT OF SESSION TASK REVIEW:")
-        session_tasks = gpt_response.get("session_tasks_review", {})
-        if (session_tasks.get("practice_skills") or 
-            session_tasks.get("task_effectiveness") or 
-            session_tasks.get("challenges")):
-            
-            if session_tasks.get("practice_skills"):
-                for item in session_tasks["practice_skills"]:
-                    notes.append(f"- {item}")
-                    
-            if session_tasks.get("task_effectiveness"):
-                for item in session_tasks["task_effectiveness"]:
-                    notes.append(f"- {item}")
-                    
-            if session_tasks.get("challenges"):
-                for item in session_tasks["challenges"]:
-                    notes.append(f"- {item}")
-        else:
-            notes.append("No out of session task review documented during session")
-            
-        notes.append("")
-        
-        # CURRENT PRESENTATION
-        notes.append("## CURRENT PRESENTATION:")
-        current = gpt_response.get("current_presentation", {})
-        if current.get("current_symptoms") or current.get("changes"):
-            if current.get("current_symptoms"):
-                for item in current["current_symptoms"]:
-                    notes.append(f"- {item}")
-                    
-            if current.get("changes"):
-                for item in current["changes"]:
-                    notes.append(f"- {item}")
-        else:
-            notes.append("No current presentation documented during session")
-            
-        notes.append("")
-        
-        # SESSION CONTENT
-        notes.append("## SESSION CONTENT:")
-        session = gpt_response.get("session_content", {})
-        if (session.get("issues_raised") or session.get("discussions") or 
-            session.get("therapy_goals") or session.get("progress") or 
-            session.get("main_topics")):
-            
-            if session.get("issues_raised"):
-                for item in session["issues_raised"]:
-                    notes.append(f"- {item}")
-                    
-            if session.get("discussions"):
-                for item in session["discussions"]:
-                    notes.append(f"- {item}")
-                    
-            if session.get("therapy_goals"):
-                for item in session["therapy_goals"]:
-                    notes.append(f"- {item}")
-                    
-            if session.get("progress"):
-                for item in session["progress"]:
-                    notes.append(f"- {item}")
-                    
-            if session.get("main_topics"):
-                for item in session["main_topics"]:
-                    notes.append(f"- {item}")
-        else:
-            notes.append("No session content documented during session")
-            
-        notes.append("")
-        
-        # INTERVENTION
-        notes.append("## INTERVENTION:")
-        intervention = gpt_response.get("intervention", {})
-        if intervention.get("techniques") or intervention.get("strategies"):
-            if intervention.get("techniques"):
-                for item in intervention["techniques"]:
-                    notes.append(f"- {item}")
-                    
-            if intervention.get("strategies"):
-                for item in intervention["strategies"]:
-                    notes.append(f"- {item}")
-        else:
-            notes.append("No intervention documented during session")
-            
-        notes.append("")
-        
-        # SETBACKS/BARRIERS/PROGRESS WITH TREATMENT
-        notes.append("## SETBACKS/ BARRIERS/ PROGRESS WITH TREATMENT:")
-        progress = gpt_response.get("treatment_progress", {})
-        if progress.get("setbacks") or progress.get("satisfaction"):
-            if progress.get("setbacks"):
-                for item in progress["setbacks"]:
-                    notes.append(f"- {item}")
-                    
-            if progress.get("satisfaction"):
-                for item in progress["satisfaction"]:
-                    notes.append(f"- {item}")
-        else:
-            notes.append("No setbacks/barriers/progress with treatment documented during session")
-            
-        notes.append("")
-        
-        # RISK ASSESSMENT AND MANAGEMENT
-        notes.append("## RISK ASSESSMENT AND MANAGEMENT:")
-        risk = gpt_response.get("risk_assessment", {})
-        has_risk_info = False
-        
-        for field in ["suicidal_ideation", "homicidal_ideation", "self_harm", "violence"]:
-            if risk.get(field) and risk[field].strip():
-                has_risk_info = True
-                break
-                
-        if has_risk_info or (risk.get("management_plan") and risk["management_plan"]):
-            if risk.get("suicidal_ideation") and risk["suicidal_ideation"].strip():
-                notes.append(f"- Suicidal Ideation: {risk['suicidal_ideation']}")
-                
-            if risk.get("homicidal_ideation") and risk["homicidal_ideation"].strip():
-                notes.append(f"- Homicidal Ideation: {risk['homicidal_ideation']}")
-                
-            if risk.get("self_harm") and risk["self_harm"].strip():
-                notes.append(f"- Self-harm: {risk['self_harm']}")
-                
-            if risk.get("violence") and risk["violence"].strip():
-                notes.append(f"- Violence & Aggression: {risk['violence']}")
-                
-            if risk.get("management_plan") and risk["management_plan"]:
-                notes.append("")
-                notes.append("### Management Plan:")
-                for item in risk["management_plan"]:
-                    notes.append(f"- {item}")
-        else:
-            notes.append("No risk assessment and management documented during session")
-            
-        notes.append("")
-        
-        # MENTAL STATUS EXAMINATION
-        notes.append("## MENTAL STATUS EXAMINATION:")
-        mental = gpt_response.get("mental_status", {})
-        has_mental_status = False
-        
-        for field in ["appearance", "behaviour", "speech", "mood", "affect", 
-                     "thoughts", "perceptions", "cognition", "insight", "judgment"]:
-            if mental.get(field) and mental[field].strip():
-                has_mental_status = True
-                break
-                
-        if has_mental_status:
-            mental_status_fields = [
-                ("appearance", "Appearance: "),
-                ("behaviour", "Behaviour: "),
-                ("speech", "Speech: "),
-                ("mood", "Mood: "),
-                ("affect", "Affect: "),
-                ("thoughts", "Thoughts: "),
-                ("perceptions", "Perceptions: "),
-                ("cognition", "Cognition: "),
-                ("insight", "Insight: "),
-                ("judgment", "Judgment: ")
-            ]
-            
-            for field, label in mental_status_fields:
-                if mental.get(field) and mental[field].strip():
-                    notes.append(f"{label}{mental[field]}")
-        else:
-            notes.append("No mental status examination documented during session")
-            
-        notes.append("")
-        
-        # OUT OF SESSION TASKS
-        notes.append("## OUT OF SESSION TASKS:")
-        tasks = gpt_response.get("out_of_session_tasks", [])
-        if tasks:
-            for item in tasks:
-                notes.append(f"- {item}")
-        else:
-            notes.append("No out of session tasks documented during session")
-                
-        notes.append("")
-        
-        # PLAN FOR NEXT SESSION
-        notes.append("## PLAN FOR NEXT SESSION:")
-        next_session = gpt_response.get("next_session", {})
-        if next_session.get("date") or (next_session.get("plan") and next_session["plan"]):
-            if next_session.get("date"):
-                notes.append(f"- Next Session: {next_session['date']}")
-                
-            if next_session.get("plan") and next_session["plan"]:
-                for item in next_session["plan"]:
-                    notes.append(f"- {item}")
-        else:
-            notes.append("No plan for next session documented during session")
-        
-        return "\n".join(notes)
-    except Exception as e:
-        error_logger.error(f"Error formatting psychology session notes: {str(e)}", exc_info=True)
-        return f"Error formatting psychology session notes: {str(e)}"
-    
-async def format_discharge_summary(gpt_response):
-    """
-    Format a discharge summary from GPT structured response based on DISCHARGE_SUMMARY_SCHEMA.
-    
-    Args:
-        gpt_response: Dictionary containing the structured discharge summary data
-        
-    Returns:
-        Formatted string containing the human-readable discharge summary
-    """
-    try:
-        summary = []
-        
-        # Title
-        summary.append("# Discharge Summary:")
-        summary.append("")
-        
-        # Client information
-        client = gpt_response.get("client", {})
-        
-        # For client name, use placeholder if missing
-        if client.get("name"):
-            summary.append(f"Client Name: {client['name']}")
-        else:
-            summary.append("Client Name: [client name]")
-            
-        # For DOB, use placeholder if missing
-        if client.get("dob"):
-            summary.append(f"Date of Birth: {client['dob']}")
-        else:
-            summary.append("Date of Birth: [date of birth]")
-            
-        # For discharge date, use today's date if missing
-        if client.get("discharge_date"):
-            summary.append(f"Date of Discharge: {client['discharge_date']}")
-        else:
-            # Use current date
-            current_date = datetime.now().strftime("%B %d, %Y")
-            summary.append(f"Date of Discharge: {current_date}")
-            
-        summary.append("")
-        
-        # Referral Information
-        summary.append("## Referral Information")
-        referral = gpt_response.get("referral", {})
-        referral_documented = False
-        
-        if referral.get("source"):
-            summary.append(f"- Referral Source: {referral['source']}")
-            referral_documented = True
-            
-        if referral.get("reason"):
-            summary.append(f"- Reason for Referral: {referral['reason']}")
-            referral_documented = True
-            
-        if not referral_documented:
-            summary.append("No referral information documented during session")
-            
-        summary.append("")
-        
-        # Presenting Issues
-        summary.append("## Presenting Issues:")
-        presenting_issues = gpt_response.get("presenting_issues", [])
-        if presenting_issues:
-            for issue in presenting_issues:
-                summary.append(f"- {issue}")
-        else:
-            summary.append("No presenting issues documented during session")
-            
-        summary.append("")
-        
-        # Diagnosis
-        summary.append("## Diagnosis:")
-        diagnosis = gpt_response.get("diagnosis", [])
-        if diagnosis:
-            for item in diagnosis:
-                summary.append(f"- {item}")
-        else:
-            summary.append("No diagnosis documented during session")
-            
-        summary.append("")
-        
-        # Treatment Summary
-        summary.append("## Treatment Summary:")
-        treatment = gpt_response.get("treatment_summary", {})
-        treatment_documented = False
-        
-        # Treatment duration
-        if treatment.get("duration"):
-            summary.append(f"- Duration of Therapy: {treatment['duration']}")
-            treatment_documented = True
-            
-        # Number of sessions
-        if treatment.get("sessions"):
-            summary.append(f"- Number of Sessions: {treatment['sessions']}")
-            treatment_documented = True
-            
-        # Type of therapy
-        if treatment.get("therapy_type"):
-            summary.append(f"- Type of Therapy: {treatment['therapy_type']}")
-            treatment_documented = True
-            
-        # Therapeutic goals
-        if treatment.get("goals") and len(treatment["goals"]) > 0:
-            summary.append("- Therapeutic Goals:")
-            for goal in treatment["goals"]:
-                summary.append(f"  - {goal}")
-            treatment_documented = True
-            
-        # Treatment description
-        if treatment.get("description"):
-            summary.append(f"- {treatment['description']}")
-            treatment_documented = True
-            
-        # Medications
-        if treatment.get("medications"):
-            summary.append(f"- {treatment['medications']}")
-            treatment_documented = True
-            
-        if not treatment_documented:
-            summary.append("No treatment details documented during session")
-            
-        summary.append("")
-        
-        # Progress and Response to Treatment
-        summary.append("## Progress and Response to Treatment:")
-        progress = gpt_response.get("progress", {})
-        progress_documented = False
-        
-        if progress.get("overall"):
-            summary.append(f"- {progress['overall']}")
-            progress_documented = True
-            
-        if progress.get("goal_progress") and len(progress["goal_progress"]) > 0:
-            summary.append("- Progress Toward Goals:")
-            for i, goal_progress in enumerate(progress["goal_progress"], 1):
-                summary.append(f"  - Goal {i}: {goal_progress}")
-            progress_documented = True
-            
-        if not progress_documented:
-            summary.append("No treatment progress documented during session")
-            
-        summary.append("")
-        
-        # Clinical Observations
-        summary.append("## Clinical Observations")
-        observations = gpt_response.get("clinical_observations", {})
-        observations_documented = False
-        
-        if observations.get("engagement"):
-            summary.append(f"- Client's Engagement: {observations['engagement']}")
-            observations_documented = True
-            
-        # Client's Strengths
-        if observations.get("strengths") and len(observations["strengths"]) > 0:
-            summary.append("- Client's Strengths:")
-            for strength in observations["strengths"]:
-                summary.append(f"  - {strength}")
-            observations_documented = True
-            
-        # Client's Challenges
-        if observations.get("challenges") and len(observations["challenges"]) > 0:
-            summary.append("- Client's Challenges:")
-            for challenge in observations["challenges"]:
-                summary.append(f"  - {challenge}")
-            observations_documented = True
-            
-        if not observations_documented:
-            summary.append("No clinical observations documented during session")
-            
-        summary.append("")
-        
-        # Risk Assessment
-        summary.append("## Risk Assessment:")
-        if gpt_response.get("risk_assessment"):
-            summary.append(f"- {gpt_response['risk_assessment']}")
-        else:
-            summary.append("No risk assessment documented during session")
-            
-        summary.append("")
-        
-        # Outcome of Therapy
-        summary.append("## Outcome of Therapy")
-        outcome = gpt_response.get("outcome", {})
-        outcome_documented = False
-        
-        if outcome.get("current_status"):
-            summary.append(f"- Current Status: {outcome['current_status']}")
-            outcome_documented = True
-            
-        if outcome.get("remaining_issues"):
-            summary.append(f"- Remaining Issues: {outcome['remaining_issues']}")
-            outcome_documented = True
-            
-        if outcome.get("client_perspective"):
-            summary.append(f"- Client's Perspective: {outcome['client_perspective']}")
-            outcome_documented = True
-            
-        if outcome.get("therapist_assessment"):
-            summary.append(f"- Therapist's Assessment: {outcome['therapist_assessment']}")
-            outcome_documented = True
-            
-        if not outcome_documented:
-            summary.append("No therapy outcome details documented during session")
-            
-        summary.append("")
-        
-        # Reason for Discharge
-        summary.append("## Reason for Discharge")
-        discharge_reason = gpt_response.get("discharge_reason", {})
-        reason_documented = False
-        
-        if discharge_reason.get("reason"):
-            summary.append(f"- Discharge Reason: {discharge_reason['reason']}")
-            reason_documented = True
-            
-        if discharge_reason.get("client_understanding"):
-            summary.append(f"- Client's Understanding and Agreement: {discharge_reason['client_understanding']}")
-            reason_documented = True
-            
-        if not reason_documented:
-            summary.append("No discharge reason documented during session")
-            
-        summary.append("")
-        
-        # Discharge Plan
-        summary.append("## Discharge Plan:")
-        if gpt_response.get("discharge_plan"):
-            summary.append(f"- {gpt_response['discharge_plan']}")
-        else:
-            summary.append("No discharge plan documented during session")
-            
-        summary.append("")
-        
-        # Recommendations
-        summary.append("## Recommendations:")
-        recommendations = gpt_response.get("recommendations", {})
-        recommendations_documented = False
-        
-        if recommendations.get("overall"):
-            summary.append(f"- {recommendations['overall']}")
-            recommendations_documented = True
-            
-        # Follow-Up Care
-        if recommendations.get("followup") and len(recommendations["followup"]) > 0:
-            summary.append("- Follow-Up Care:")
-            for followup in recommendations["followup"]:
-                summary.append(f"  - {followup}")
-            recommendations_documented = True
-            
-        # Self-Care Strategies
-        if recommendations.get("self_care") and len(recommendations["self_care"]) > 0:
-            summary.append("- Self-Care Strategies:")
-            for strategy in recommendations["self_care"]:
-                summary.append(f"  - {strategy}")
-            recommendations_documented = True
-            
-        if recommendations.get("crisis_plan"):
-            summary.append(f"- Crisis Plan: {recommendations['crisis_plan']}")
-            recommendations_documented = True
-            
-        if recommendations.get("support_systems"):
-            summary.append(f"- Support Systems: {recommendations['support_systems']}")
-            recommendations_documented = True
-            
-        if not recommendations_documented:
-            summary.append("No recommendations documented during session")
-            
-        summary.append("")
-        
-        # Additional Notes
-        summary.append("## Additional Notes:")
-        if gpt_response.get("additional_notes"):
-            summary.append(f"- {gpt_response['additional_notes']}")
-        else:
-            summary.append("No additional notes documented during session")
-            
-        summary.append("")
-        
-        # Final Note
-        summary.append("## Final Note")
-        if gpt_response.get("final_note"):
-            summary.append(f"- Therapist's Closing Remarks: {gpt_response['final_note']}")
-        else:
-            summary.append("No final remarks documented during session")
-            
-        summary.append("")
-        
-        # Clinician Information
-        clinician = gpt_response.get("clinician", {})
-        if clinician.get("name"):
-            summary.append(f"Clinician's Name: {clinician['name']}")
-        else:
-            summary.append("Clinician's Name: [clinician name]")
-            
-        summary.append("Clinician's Signature: [signature]")
-        
-        if clinician.get("date"):
-            summary.append(f"Date: {clinician['date']}")
-        else:
-            # Use current date
-            current_date = datetime.now().strftime("%B %d, %Y")
-            summary.append(f"Date: {current_date}")
-            
-        summary.append("")
-        
-        # Attachments
-        summary.append("## Attachments (if any)")
-        attachments = gpt_response.get("attachments", [])
-        if attachments:
-            for attachment in attachments:
-                summary.append(f"- {attachment}")
-        else:
-            summary.append("[None]")
-        
-        return "\n".join(summary)
-    except Exception as e:
-        error_logger.error(f"Error formatting discharge summary: {str(e)}", exc_info=True)
-        return f"Error formatting discharge summary: {str(e)}"
-    
-async def format_pathology(gpt_response):
-    """
-    Format a pathology note from GPT structured response based on PATHOLOGY_NOTE_SCHEMA.
-    
-    Args:
-        gpt_response: Dictionary containing the structured pathology note data
-        
-    Returns:
-        Formatted string containing the human-readable pathology note
-    """
-    try:
-        note = []
-        
-        # Add heading
-        note.append("# PATHOLOGY NOTE\n")
-        
-        # Therapy session attended to section
-        note.append("## Therapy session attended to")
-        therapy_attendance = gpt_response.get("therapy_attendance", {})
-        attendance_documented = False
-        
-        attendance_fields = [
-            ("current_issues", "- "),
-            ("past_medical_history", "- "),
-            ("medications", "- "),
-            ("social_history", "- "),
-            ("allergies", "- ")
-        ]
-        
-        for field, prefix in attendance_fields:
-            if therapy_attendance.get(field) and therapy_attendance[field] != "Not documented":
-                note.append(f"{prefix}{therapy_attendance[field]}")
-                attendance_documented = True
-                
-        if not attendance_documented:
-            note.append("No attendance details documented during this session.")
-            
-        note.append("")
-        
-        # Objective section
-        note.append("## Objective:")
-        objective = gpt_response.get("objective", {})
-        objective_documented = False
-        
-        objective_fields = [
-            ("examination_findings", "- "),
-            ("diagnostic_tests", "- ")
-        ]
-        
-        for field, prefix in objective_fields:
-            if objective.get(field) and objective[field] != "Not documented":
-                note.append(f"{prefix}{objective[field]}")
-                objective_documented = True
-                
-        if not objective_documented:
-            note.append("No objective findings documented during this session.")
-            
-        note.append("")
-        
-        # Reports section
-        note.append("## Reports:")
-        if gpt_response.get("reports") and gpt_response["reports"] != "Not documented":
-            note.append(f"- {gpt_response['reports']}")
-        else:
-            note.append("No reports documented during this session.")
-            
-        note.append("")
-        
-        # Therapy section
-        note.append("## Therapy:")
-        therapy = gpt_response.get("therapy", {})
-        therapy_documented = False
-        
-        therapy_fields = [
-            ("current_therapy", "- "),
-            ("therapy_changes", "- ")
-        ]
-        
-        for field, prefix in therapy_fields:
-            if therapy.get(field) and therapy[field] != "Not documented":
-                note.append(f"{prefix}{therapy[field]}")
-                therapy_documented = True
-                
-        if not therapy_documented:
-            note.append("No therapy details documented during this session.")
-            
-        note.append("")
-        
-        # Outcome section
-        note.append("## Outcome:")
-        if gpt_response.get("outcome") and gpt_response["outcome"] != "Not documented":
-            note.append(f"- {gpt_response['outcome']}")
-        else:
-            note.append("No outcomes documented during this session.")
-            
-        note.append("")
-        
-        # Plan section
-        note.append("## Plan:")
-        plan = gpt_response.get("plan", {})
-        plan_documented = False
-        
-        plan_fields = [
-            ("future_plan", "- "),
-            ("followup", "- ")
-        ]
-        
-        for field, prefix in plan_fields:
-            if plan.get(field) and plan[field] != "Not documented":
-                note.append(f"{prefix}{plan[field]}")
-                plan_documented = True
-                
-        if not plan_documented:
-            note.append("No plan documented during this session.")
-        
-        return "\n".join(note)
-    except Exception as e:
-        error_logger.error(f"Error formatting pathology note: {str(e)}", exc_info=True)
-        return f"Error formatting pathology note: {str(e)}"
-
 @app.post("/generate-custom-report")
 @log_execution_time
 async def generate_custom_report(
     transcript_id: str = Form(...),
     custom_template: str = Form(...),
+    user_prompt: Optional[str] = Form(None),
     template_type: str = Form(...)  # <-- Add this field for template name/type
 ):
     """
@@ -6021,8 +4898,8 @@ async def generate_custom_report(
 
         # Parse and validate custom template
         try:
-            template_schema = json.loads(custom_template)
-            main_logger.info("Custom template parsed successfully")
+            template_schema = custom_template
+            main_logger.info("Custom template taken successfully")
         except json.JSONDecodeError as e:
             error_msg = f"Invalid JSON format for custom template: {str(e)}"
             error_logger.error(error_msg)
@@ -6053,7 +4930,7 @@ async def generate_custom_report(
             )
 
         # Generate report using the custom template
-        formatted_report = await generate_report_from_transcription(transcription, template_schema)
+        formatted_report = await generate_report_from_transcription(transcription, template_schema, user_prompt)
         if isinstance(formatted_report, str) and formatted_report.startswith("Error"):
             return JSONResponse({"error": formatted_report}, status_code=400)
 
@@ -6092,7 +4969,7 @@ async def generate_custom_report(
         error_logger.exception(error_msg)
         return JSONResponse({"error": error_msg}, status_code=500)
 
-async def generate_report_from_transcription(transcription, template_schema):
+async def generate_report_from_transcription(transcription, template_schema, user_prompt):
     """
     Generate a report from transcription data using a custom template schema.
     
@@ -6106,20 +4983,124 @@ async def generate_report_from_transcription(transcription, template_schema):
     try:
         # Prepare the system prompt
         system_prompt = """
-        You are a medical documentation expert tasked with generating a comprehensive report from transcription data. 
-        Follow the custom template provided meticulously, ensuring that each section is addressed with precision and clarity.
+        You are a clinical documentation specialist AI trained to convert physician-patient conversations into structured, professional medical reports. 
+        Your task is to use a provided custom report template to generate a clear, concise, and accurate report from the transcription data.
 
         Instructions:
-        1. **Accuracy and Completeness**: Ensure all relevant information from the transcription is included. Cross-reference with the template to avoid missing any sections.
-        2. **Medical Terminology**: Use standardized medical terminology and professional language consistent with healthcare practice in the USA, UK, Australia, and Canada. Employ appropriate clinical abbreviations where standard (e.g., PMH for past medical history, Hx for history).
-        3. **Structure**: Format the report with clear headings. Use "# " for main headings and "## " for subheadings.
-        4. **Content Style**: Present information in concise bullet points whenever possible. If data for a section is not available, write "Not documented during session" for that section.
-        5. **Formatting**: Start directly with the report title/heading, without any introductory text like "Based on the transcript" or similar prefixes.
-        6. **Clinical Precision**: Use precise clinical descriptions and avoid colloquial language. Maintain objectivity and clinical assessment language throughout.
-        7. **Confidentiality**: Ensure that all patient information is handled with the utmost confidentiality and privacy.
+        1. **Accuracy & Completeness**: Extract all relevant clinical details directly from the transcript. Ensure no section of the template is left unaddressed if data is available.
+        2. **Medical Terminology**: Use standardized medical terms, abbreviations (e.g., PMH, Hx), and a clinical tone suitable for the USA, UK, Australia, and Canada.
+        3. **Formatting**:
+        - Use `#` for main headings and `##` for subheadings.
+        - Use bullet points (`•`) for discrete facts (e.g., symptoms, medications).
+        - Use paragraph form for narratives or multi-sentence content — **never mix bullets and paragraphs**.
+        4. **Conciseness**: Prioritize utility. Avoid repetition and verbose descriptions. Do not include generic or filler text.
+        5. **Missing Data**: If a section of the template is not covered in the transcript, omit it entirely.
+        6. **Clinical Tone**: Use objective, professional language. Avoid assumptions or casual phrasing.
+        7. **Confidentiality**: Handle all patient information with strict confidentiality.
 
-        Your goal is to produce a clean, well-structured medical report using professional clinical language that healthcare professionals can quickly read and understand.
+        Your goal is to produce a physician-ready medical report with the utmost clarity and precision.
         """
+        DATE_INSTRUCTIONS = """
+            Date Handling Instructions:
+            - Use {reference_date} as the reference date for all temporal expressions in the transcription.
+            - Convert relative time references to specific dates based on the reference date:
+            - "This morning," "today," or similar terms refer to the reference date.
+            - "X days ago" refers to the reference date minus X days (e.g., "five days ago" is reference date minus 5 days).
+            - "Last week" refers to approximately 7 days prior, adjusting for specific days if mentioned (e.g., "last Wednesday" is the most recent Wednesday before the reference date).
+            - Format all dates as DD/MM/YYYY (e.g., 10/06/2025) in the output.
+            - Do not use hardcoded dates or assumed years unless explicitly stated in the transcription.
+            - Verify date calculations to prevent errors, such as incorrect years or misaligned days.
+            """
+
+        current_date = None
+        if "metadata" in transcription and "current_date" in transcription["metadata"]:
+            current_date = transcription["metadata"]["current_date"]
+        # Core instructions for all medical documentation templates
+        preservation_instructions = """
+            CRITICAL DATA PRESERVATION RULES:
+            1. Retain all mentioned **dates** (symptom onset, appointments, follow-ups, etc.).
+            2. Include full **medication details** — name, dosage, frequency, and route.
+            3. Preserve **all numerical values** — vitals, labs, durations, measurements.
+            4. Include **precise timeframes** — "for 2 weeks", "since 10th April", etc.
+            5. Do not summarize or paraphrase numeric or clinical data.
+            6. Include all **diagnostic, procedural, and treatment history**.
+            7. Capture all stated **allergies, reactions, and contraindications**.
+            """
+        # Add grammar-specific instructions to all templates
+        grammar_instructions = """
+            GRAMMAR REQUIREMENTS:
+            1. Use standard US English grammar with correct punctuation.
+            2. Ensure subject-verb and noun-pronoun agreement.
+            3. Use proper prepositions (e.g., “dependent on” not “dependent of”).
+            4. Avoid article misuse (e.g., no “the a”).
+            5. Maintain consistent verb tenses throughout.
+            6. Write clearly with no grammatical ambiguity.
+            7. Maintain professional, clinical tone — no colloquialisms or contractions.
+            """
+
+        formatting_instructions = """You are an AI model tasked with generating structured reports. Follow strict formatting rules as outlined below:
+
+            Headings must begin with # followed by a space.
+            Example:
+            # Clinical Summary
+
+            Subheadings must begin with ## followed by a space.
+            Example:
+            ## Patient History
+
+            For lists or key points:
+            Each point must start with one level of indentation (2 spaces) followed by a bullet point (•) and a space. Make sure it is bullet.
+            Use this format only for distinct items or short, listed information.
+            Example:
+            • Patient reported mild headache
+            • No known drug allergies
+            
+            For paragraphs or multiple sentences, do not use bullets or indentation. Just write in standard paragraph form.
+
+            Never mix bullets and paragraphs. If it's a narrative, use plain text. If it's a list of discrete points, follow the bullet format.
+
+            Stick to this formatting exactly in every section of the report.
+
+            If data for some heading is missing (not mentioned during session) then ignore that heading and dont include it in the output.
+
+            Use '•  ' (Unicode bullet point U+2022 followed by two spaces) for all points in S, PMedHx, SocHx, FHx, O, and for A/P subheadings and their content.
+        
+"""
+       
+        date_instructions = DATE_INSTRUCTIONS.format(reference_date=current_date)
+
+        user_message= f"""You are provided with a medical conversation transcript.
+
+            Your task is to:
+            - Analyze the transcript carefully and generate a structured report using the custom template below.
+            - Use **only** the information explicitly stated in the conversation.
+            - Do **not** assume or fabricate any data.
+            - Omit any sections of the template where no data is provided in the transcript.
+            - Prioritize brevity, clarity, and clinical usefulness. Avoid repeating the same point multiple times.
+
+            Ensure:
+            - All numeric data is preserved exactly as stated.
+            - Dates are interpreted based on the reference date: {current_date}
+            - The final report is accurate, cleanly formatted, and sounds like it was authored by a medical professional.
+
+            Below is the custom report template:
+            {template_schema}
+
+            Below is the transcript:
+            {transcription}
+
+            Use the following formatting rules:
+            {formatting_instructions}
+
+            Date handling rules:
+            {date_instructions}
+
+            Grammar and language requirements:
+            {grammar_instructions}
+
+            Critical data preservation rules:
+            {preservation_instructions}
+        """ + user_prompt
 
         # Extract conversation text
         conversation_text = ""
@@ -6130,7 +5111,7 @@ async def generate_report_from_transcription(transcription, template_schema):
                 conversation_text += f"{speaker}: {text}\n\n"
 
         # Generate the report using a language model API
-        report = await generate_report_with_language_model(conversation_text, template_schema, system_prompt)
+        report = await generate_report_with_language_model(conversation_text, template_schema, system_prompt, user_message)
 
         return report
 
@@ -6139,7 +5120,7 @@ async def generate_report_from_transcription(transcription, template_schema):
         error_logger.error(error_msg, exc_info=True)
         return f"Error: {error_msg}"
 
-async def generate_report_with_language_model(conversation_text, template_schema, system_prompt):
+async def generate_report_with_language_model(conversation_text, template_schema, system_prompt, user_message):
     """
     Generate a report using a language model API.
     
@@ -6152,22 +5133,16 @@ async def generate_report_with_language_model(conversation_text, template_schema
         A generated report as a string.
     """
     try:
-        # Format the template schema as a string if it's a dictionary
-        if isinstance(template_schema, dict):
-            template_schema_str = json.dumps(template_schema, indent=2)
-        else:
-            template_schema_str = str(template_schema)
-            
+       
         # Use the global client with API key
         global client
         response = client.chat.completions.create(
-            model="gpt-4", # or another appropriate model like "gpt-3.5-turbo"
+            model="gpt-4.1", # or another appropriate model like "gpt-3.5-turbo"
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Here is the conversation transcript:\n\n{conversation_text}\n\nTemplate Schema:\n{template_schema_str}\n\nPlease generate a report based on this template."}
+                {"role": "user", "content": user_message}
             ],
-            temperature=0.7,
-            max_tokens=3500
+            temperature=0.3,
         )
         
         # Extract the generated report from the response
