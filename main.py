@@ -2263,10 +2263,10 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
                 b) ICE: Patient’s Ideas, Concerns, and Expectations, if mentioned.
                 c) Red Flag Symptoms: Presence or absence of red flag symptoms relevant to the presenting complaint, if mentioned. Try to accomodate all red flag in concise way in 1-2 points if they are mentioned.
                 d) Relevant Risk Factors: Risk factors relevant to the complaint, if mentioned.
-                e) PMH/PSH: Past medical or surgical history, if mentioned.
-                f) DH/Allergies: Drug history/medications and allergies, if mentioned (omit allergies if not mentioned).
-                g) FH: Relevant family history, if mentioned.
-                h) SH: Social history (e.g., lives with, occupation, smoking/alcohol/drugs, recent travel, carers/package of care), if mentioned.
+                e) Past Medical/Surgical History: Past medical or surgical history, if mentioned.
+                f) Drug History / Allergies: Drug history/medications and allergies, if mentioned (omit allergies if not mentioned).
+                g) Family History: Relevant family history, if mentioned.
+                h) Social History: Social history (e.g., lives with, occupation, smoking/alcohol/drugs, recent travel, carers/package of care), if mentioned.
             - Omit any subheading or field if no relevant information is provided.
 
             ## Examination:
@@ -2363,9 +2363,9 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             • Symptoms worse at night
             • Initially thought it was just a cold
             • Son had bad cold last week
-            • PMH: Mild asthma, uses albuterol inhaler 1-2 times weekly, Type 2 diabetes diagnosed 3 years ago
-            • DH: Metformin 500mg BD, albuterol inhaler PRN. Allergies: None known
-            • SH: Ex-smoker, quit 10 years ago
+            • Past Medical History: Mild asthma, uses albuterol inhaler 1-2 times weekly, Type 2 diabetes diagnosed 3 years ago
+            • Drug History/Allergies: Metformin 500mg BD, albuterol inhaler PRN. Allergies: None known
+            • social History: Ex-smoker, quit 10 years ago
 
             Examination:
             • T 37.6°C, Sats 94%, HR 92 bpm, RR 22
@@ -2377,14 +2377,14 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             2. Type 2 Diabetes
 
             Plan:
-            • Investigations Planned:
+            Investigations Planned:
                 • Follow-up in 3-5 days to reassess lungs and glucose control.
-            • Treatment Planned:
+            Treatment Planned:
                 • Amoxicillin clavulanate 875/125mg BD for 7 days.
                 • Increase albuterol inhaler to every 4-6 hours PRN.
                 • Prednisone 40mg daily for 5 days.
                 • Guaifenesin with dextromethorphan for cough PRN.
-            • Advice:
+            Advice:
                 • Monitor blood glucose more frequently while on prednisone.
                 • Rest, stay hydrated, avoid exertion.
                 • Use humidifier at night, avoid cold air.
