@@ -477,7 +477,8 @@ async def process_transcription_results(deepgram_socket, websocket, client_id):
                         if data.get("type") == "Results":
                             # Extract the transcript text and speaker
                             transcript_text = data["channel"]["alternatives"][0]["transcript"]
-                            speaker = data["channel"]["alternatives"][0].get("speaker", "Speaker 0")
+                            words = transcript.get("words", [])
+                            speaker = f"Speaker {words[0]['speaker']}" if words and 'speaker' in words[0] else "Speaker 0"
                             is_final = data.get("is_final", False)
 
                             # Add to session data
