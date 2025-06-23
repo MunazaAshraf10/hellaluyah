@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Form, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, Form, WebSocket, WebSocketDisconnect, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -589,6 +589,115 @@ def merge_transcriptions(results: list[dict], chunk_durations: list[float]) -> d
         error_logger.error(f"Error merging transcriptions: {str(e)}")
         raise
 
+# async def transcribe_chunk(
+#     chunk: bytes,
+#     chunk_index: int,
+#     enable_diarization: bool = True,
+#     target_format: str = "wav",
+#     model: str = "nova-3-general"
+# ) -> tuple[dict, float]:
+#     """
+#     Transcribe a single audio chunk with language detection and diarization.
+#     """
+#     try:
+#         chunk_hash = hashlib.sha256(chunk).hexdigest()
+#         table = dynamodb.Table('transcripts')
+#         response = table.get_item(Key={"id": chunk_hash})
+#         if 'Item' in response:
+#             main_logger.info(f"Retrieved cached transcription for chunk {chunk_index}")
+#             result = json.loads(decrypt_data(response['Item']['transcript']))
+#             duration = AudioSegment.from_file(io.BytesIO(chunk), format=target_format).duration_seconds
+#             return result, duration
+
+#         start_time = time.time()
+#         params = {
+#             "model": model,
+#             "detect_language": "true",
+#             "topics": "true",
+#             "smart_format": "true",
+#             "punctuate": "true",
+#             "utterances": "true",
+#             "language": "multi",
+#             "utt_split": 0.6,
+#             "diarize": str(enable_diarization).lower(),
+#             "sentiment": "true",
+#             "sensitivity": "high"
+#         }
+
+#         async with ClientSession() as session:
+#             async with session.post(
+#                 "https://api.deepgram.com/v1/listen",
+#                 headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"},
+#                 data=chunk,
+#                 params=params
+#             ) as response:
+#                 response.raise_for_status()
+#                 result = await response.json()
+
+#         # Extract language info for logging
+#         lang = result.get("results", {}).get("channels", [{}])[0].get("detected_language", "unknown")
+#         confidence = result.get("results", {}).get("channels", [{}])[0].get("language_confidence", 0)
+#         main_logger.info(f"Chunk {chunk_index}: Detected language={lang} (confidence={confidence:.2f})")
+
+#         duration = AudioSegment.from_file(io.BytesIO(chunk), format=target_format).duration_seconds
+#         await save_transcript_to_dynamodb(
+#             result,
+#             {"chunk_hash": chunk_hash, "chunk_index": chunk_index},
+#             status="completed",
+#             transcript_id=chunk_hash
+#         )
+
+#         main_logger.info(f"Chunk {chunk_index} transcription took {time.time() - start_time:.2f} seconds")
+#         return result, duration
+#     except Exception as e:
+#         error_logger.error(f"Error transcribing chunk {chunk_index}: {str(e)}")
+#         return {"error": str(e)}, 0.0
+
+# @log_execution_time
+# async def transcribe_audio_with_diarization(audio_data: bytes, enable_diarization: bool = True, model: str = "nova-3-general") -> dict:
+#     """
+#     Transcribe audio with diarization and auto language detection.
+#     """
+#     try:
+#         start_time = time.time()
+#         main_logger.info(f"Starting transcription for audio of size {len(audio_data)} bytes")
+
+#         chunks = split_audio(audio_data)
+
+#         max_concurrent_tasks = 5
+#         tasks = [
+#             transcribe_chunk(chunk, idx, enable_diarization, model=model)
+#             for idx, chunk in enumerate(chunks)
+#         ]
+
+#         results = []
+#         for i in range(0, len(tasks), max_concurrent_tasks):
+#             batch_results = await asyncio.gather(*tasks[i:i + max_concurrent_tasks], return_exceptions=True)
+#             results.extend(batch_results)
+
+#         transcription_results = []
+#         chunk_durations = []
+#         for idx, (result, duration) in enumerate(results):
+#             if isinstance(result, dict) and "error" not in result:
+#                 transcription_results.append(result)
+#                 chunk_durations.append(duration)
+#             else:
+#                 error_logger.error(f"Chunk {idx} failed: {result.get('error', 'Unknown error')}")
+
+#         if not transcription_results:
+#             error_msg = "Error: All chunks failed to transcribe"
+#             error_logger.error(error_msg)
+#             return {"error": error_msg}
+
+#         transcription = merge_transcriptions(transcription_results, chunk_durations)
+#         main_logger.info(f"Transcription completed in {time.time() - start_time:.2f} seconds")
+#         return transcription
+
+#     except Exception as e:
+#         error_msg = f"Error in transcription: {str(e)}"
+#         error_logger.error(error_msg, exc_info=True)
+#         return {"error": error_msg}
+
 async def transcribe_chunk(chunk: bytes, chunk_index: int, enable_diarization: bool = True, target_format: str = "wav") -> tuple[dict, float]:
     """
     Transcribe a single audio chunk with enhanced diarization.
@@ -708,8 +817,7 @@ async def transcribe_audio_with_diarization(audio_data: bytes, enable_diarizatio
         error_msg = f"Error in transcription: {str(e)}"
         error_logger.error(error_msg, exc_info=True)
         return {"error": error_msg}
-
-
+    
 @log_execution_time
 async def save_to_aws(transcription, gpt_response, formatted_report, template_type, audio_data=None, status="completed"):
     """
@@ -781,164 +889,46 @@ async def save_to_aws(transcription, gpt_response, formatted_report, template_ty
         error_logger.error(f"[OP-{operation_id}] Error saving to AWS: {str(e)}", exc_info=True)
         return False
 
-async def receive_from_client(websocket, deepgram_socket):
-    """
-    Receive audio data from client and forward to Deepgram.
-    
-    This function handles the WebSocket communication from client to Deepgram,
-    forwarding audio data and processing control messages.
-    
-    Args:
-        websocket: The client WebSocket connection
-        deepgram_socket: The Deepgram WebSocket connection
-    """
-    try:
-        while True:
-            # Receive message from client - could be audio data or a control message
-            message = await websocket.receive()
-            
-            # Check if this is a text message (control message)
-            if "text" in message:
-                control_message = json.loads(message["text"])
-                if control_message.get("type") == "end_audio":
-                    # Client indicates they've finished sending audio
-                    break
-                continue
-                
-            # Otherwise it's binary audio data
-            data = message.get("bytes")
-            if not data:
-                continue
-                
-            # Forward the audio data to Deepgram
-            await deepgram_socket.send(data)
-            
-    except WebSocketDisconnect:
-        main_logger.info("Client disconnected during audio streaming")
-    except Exception as e:
-        error_logger.error(f"Error receiving from client: {str(e)}", exc_info=True)
-        raise
 
-async def receive_from_deepgram(deepgram_socket, client_id, session_metadata):
-    """
-    Receive transcription results from Deepgram and send to client.
+@app.post("/ask-ai")
+async def ask_ai(prompt: str = Form(...)):
+
+    if not prompt:
+        return {"error": "Missing prompt"}
     
-    This function processes the real-time transcription results from Deepgram,
-    structures them with speaker information, and sends them to the client.
-    
-    Args:
-        deepgram_socket: The Deepgram WebSocket connection
-        client_id: Unique identifier for the client
-        session_metadata: Dictionary containing session metadata
-    """
-    try:
-        mode = session_metadata.get("mode", "word-to-word")
-        session_data = manager.get_session_data(client_id)
-        
-        while True:
-            # Receive transcription results from Deepgram
-            response = await deepgram_socket.recv()
-            response_json = json.loads(response)
-            
-            # Check if this is the final response for a segment
-            is_final = response_json.get("is_final", False)
-            
-            if "channel" in response_json:
-                channel = response_json["channel"]
-                alternatives = channel.get("alternatives", [])
-                
-                if alternatives:
-                    transcript = alternatives[0].get("transcript", "")
-                    
-                    if transcript.strip():
-                        # Process speaker diarization if available
-                        if "words" in alternatives[0]:
-                            words = alternatives[0]["words"]
-                            speaker_segments = {}
-                            
-                            for word in words:
-                                speaker = word.get("speaker", 0)
-                                if speaker not in speaker_segments:
-                                    speaker_segments[speaker] = []
-                                speaker_segments[speaker].append(word.get("word", ""))
-                            
-                            # For each speaker, send their portion of the transcript
-                            for speaker, words_list in speaker_segments.items():
-                                speaker_text = " ".join(words_list)
-                                
-                                # Add speaker to session metadata
-                                session_metadata["speakers"].add(speaker)
-                                
-                                # Add to transcript if this is a final response
-                                if is_final:
-                                    transcript_entry = {
-                                        "speaker": f"Speaker {speaker}",
-                                        "text": speaker_text
-                                    }
-                                    session_metadata["transcript"].append(transcript_entry)
-                                    session_data["complete_transcript"].append(transcript_entry)
-                                
-                                # Always send to client for word-to-word mode
-                                # In AI summary mode, we can still send updates but mark differently
-                                transcript_type = "final" if is_final else "interim"
-                                await manager.send_message(
-                                    json.dumps({
-                                        "type": transcript_type,
-                                        "speaker": f"Speaker {speaker}",
-                                        "text": speaker_text,
-                                        "is_final": is_final
-                                    }),
-                                    client_id
-                                )
-                        else:
-                            # No speaker diarization, just send the transcript
-                            transcript_type = "final" if is_final else "interim"
-                            await manager.send_message(
-                                json.dumps({
-                                    "type": transcript_type,
-                                    "speaker": "Unknown",
-                                    "text": transcript,
-                                    "is_final": is_final
-                                }),
-                                client_id
-                            )
-                            
-                            # Add to transcript if this is a final response
-                            if is_final:
-                                transcript_entry = {
-                                    "speaker": "Unknown",
-                                    "text": transcript
-                                }
-                                session_metadata["transcript"].append(transcript_entry)
-                                session_data["complete_transcript"].append(transcript_entry)
-            
-            # Update session data
-            manager.update_session_data(client_id, {
-                "complete_transcript": session_data["complete_transcript"]
-            })
-            
-            # Check if we received a close message
-            if "type" in response_json and response_json["type"] == "CloseMessage":
-                # Mark transcription as complete
-                manager.update_session_data(client_id, {
-                    "is_transcription_complete": True
-                })
-                
-                # Notify client that transcription is complete
-                await manager.send_message(
-                    json.dumps({
-                        "type": "transcription_complete",
-                        "message": "Transcription processing complete."
-                    }),
-                    client_id
-                )
-                break
-                
-    except websockets.exceptions.ConnectionClosed:
-        main_logger.info("Deepgram connection closed")
-    except Exception as e:
-        error_logger.error(f"Error receiving from Deepgram: {str(e)}", exc_info=True)
-        raise
+    SYSTEM_MESSAGE = (
+    "You are an AI Scribe and Information Assistant. "
+    "Answer user prompts using clear and structured plain text only. "
+    "Do not use markdown symbols such as asterisks, dashes, or other formatting characters. "
+    "If the prompt relates to medicine, provide concise, medically accurate information. "
+    "Always respond in plain sentences or numbered lists where appropriate, with no styling."
+)
+
+    async def stream_openai_response():
+        try:
+            response = await clients.chat.completions.create(
+                model="gpt-4.1",  # You can also use "gpt-3.5-turbo" if needed
+                messages=[
+                    {"role": "system", "content": SYSTEM_MESSAGE},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.7,
+                stream=True,
+            )
+
+            async for chunk in response:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+
+
+        except Exception as e:
+            error_logger.error(f"Streaming error: {str(e)}")
+            yield "\n[Error streaming response]"
+
+    return StreamingResponse(
+        stream_openai_response(),
+        media_type="text/plain"
+    )
 
 # Save audio file to S3
 async def save_audio_to_s3(audio_data, filename=None):
@@ -4301,18 +4291,20 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             If data for any field is not available dont write anything under that heading and ignore it.
             Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
             Below is the transcript:\n\n{conversation_text}
-            
-            Below is the instructions to format the report:
-            {formatting_instructions}
+            {date_instructions}
+
+
+            Add proper indentations where required, and follow the template.
             """
             system_message = f"""You are a medical documentation assistant tasked with generating a detailed and structured cardiac assessment report based on a predefined template. 
             Your output must maintain a professional, concise, and doctor-like tone, avoiding verbose or redundant phrasing. 
             All information must be sourced exclusively from the provided transcript, contextual notes, or clinical notes, and only explicitly mentioned details should be included. 
-            If information for a specific section or placeholder is unavailable, use "None known" for risk factors, medical history, medications, allergies, social history, and investigations, or omit the placeholder entirely for other sections as specified. 
+            If information for a specific section or placeholder is unavailable ignore that heading and dont write anything.
             Do not invent or infer patient details, assessments, plans, interventions, or follow-up care beyond what is explicitly stated. 
             If data for any field is not available dont write anything under that heading and ignore it.
             Below is the instructions to format the report:
             {formatting_instructions}
+            {date_instructions}
            
             Date Handling Instructions:
                 Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
@@ -4324,116 +4316,66 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
                 Do not use hardcoded dates or assumed years unless explicitly stated in the transcription.
                 Verify date calculations to prevent errors, such as incorrect years or misaligned days.
             {preservation_instructions} {grammar_instructions}
-            Follow the structured guidelines below for each section of the report:
 
-            # Cardiology Letter
+                        Follow the structured guidelines below for each section of the report:
 
-            ## Patient Introduction:
-            • Begin the report with: "I had the pleasure of seeing [patient name] today. [patient pronoun] is a pleasant [patient age] year old [patient gender] that was referred for cardiac assessment."
-            • Insert patient name, pronoun (e.g., He/She/They), age, and gender exactly as provided in the transcript or context. If any detail is missing, leave the placeholder blank and proceed.
-
-            ## Cardiac Risk Factors:
-            • List under the heading "CARDIAC RISK FACTORS" in the following order: Increased BMI, Hypertension, Dyslipidemia, Diabetes mellitus, Smoker, Ex-smoker, Family history of atherosclerotic disease in first-degree relatives.
-            • For each risk factor, use verbatim text from contextual notes if available, updating only with new or differing information from the transcript.
-            • If no information is provided in the transcript or context, write "None known" for each risk factor.
-            • For Smoker, include pack-years, years smoked, and number of cigarettes or packs per day if mentioned in the transcript or context.
-            • For Ex-smoker, include only if the patient is not currently smoking. State the year quit and whether they quit remotely (e.g., "quit remotely in 2015") if mentioned. Omit this section if the patient is a current smoker.
-            • For Family history of atherosclerotic disease, specify if the patient’s mother, father, sister, brother, or child had a myocardial infarction, coronary angioplasty, coronary stenting, coronary bypass, peripheral arterial procedure, or stroke prior to age 55 (men) or 65 (women), as mentioned in the transcript or context.
-
-            ## Cardiac History:
-            • List under the heading "CARDIAC HISTORY" all cardiac diagnoses in the following order, if mentioned: heart failure (HFpEF or HFrEF), cardiomyopathy, arrhythmias (atrial fibrillation, atrial flutter, SVT, VT, AV block, heart block), devices (pacemakers, ICDs), valvular disease, endocarditis, pericarditis, tamponade, myocarditis, coronary disease.
-            • Use verbatim text from contextual notes, updating only with new or differing transcript information.
-            • For heart failure, specify HFpEF or HFrEF and include ICD implantation details (date and model) if mentioned.
-            • For arrhythmias, include history of cardioversions and ablations (type and date) if mentioned.
-            • For AV block, heart block, or syncope, state if a pacemaker was implanted, including type, model, and date, if mentioned.
-            • For valvular heart disease, note the type of intervention (e.g., valve replacement) and date if mentioned.
-            • For coronary disease, summarize previous angiograms, coronary anatomy, and interventions (angioplasty, stenting, CABG) with graft details and dates if mentioned.
-            • Omit this section entirely if no cardiac history is mentioned in the transcript or context.
-
-            ## Other Medical History:
-            • List under the heading "OTHER MEDICAL HISTORY" all non-cardiac diagnoses and previous surgeries with associated years if mentioned.
-            • Use verbatim text from contextual notes, updating only with new or differing transcript information.
-            • Write "None known" if no non-cardiac medical history is mentioned in the transcript or context.
-
-            ## Current Medications:
-            • List under the heading "CURRENT MEDICATIONS" in the following subcategories, each on a single line:
-                • Antithrombotic Therapy: Include aspirin, clopidogrel, ticagrelor, prasugrel, apixaban, rivaroxaban, dabigatran, edoxaban, warfarin.
-                • Antihypertensives: Include ACE inhibitors, ARBs, beta blockers, calcium channel blockers, alpha blockers, nitrates, diuretics (excluding furosemide, e.g., HCTZ, chlorthalidone, indapamide).
-                • Heart Failure Medications: Include Entresto, SGLT2 inhibitors, mineralocorticoid receptor antagonists, furosemide, metolazone, ivabradine.
-                • Lipid Lowering Medications: Include statins, ezetimibe, PCSK9 modifiers, fibrates, icosapent ethyl.
-                • Other Medications: Include any medications not listed above.
-            • For each medication, include dose, frequency, and administration if mentioned, and note the typical recommended dosage per tablet or capsule in parentheses if it differs from the patient’s dose.
-            • Use verbatim text from contextual notes, updating only with new or differing transcript information.
-            • Write "None known" for each subcategory if no medications are mentioned.
-
-            ## Allergies and Intolerances:
-            • List under the heading "ALLERGIES AND INTOLERANCES" in sentence format, separated by commas, with reactions in parentheses if mentioned (e.g., "penicillin (rash), sulfa drugs (hives)").
-            • Use verbatim text from contextual notes, updating only with new or differing transcript information.
-            • Write "None known" if no allergies or intolerances are mentioned.
-
-            ## Social History:
-            • List under the heading "SOCIAL HISTORY" in a short-paragraph narrative form.
-            • Include living situation, spousal arrangements, number of children, working arrangements, retirement status, smoking status, alcohol use, illicit or recreational drug use, and private drug/health plan status, if mentioned.
-            • For smoking, write "Smoking history as above" if the patient smokes or is an ex-smoker; otherwise, write "Non-smoker."
-            • For alcohol, specify the number of drinks per day or week if mentioned.
-            • Include comments on activities of daily living (ADLs) and instrumental activities of daily living (IADLs) if relevant.
-            • Use verbatim text from contextual notes, updating only with new or differing transcript information.
-            • Write "None known" if no social history is mentioned.
-
-            ## History:
-            • List under the heading "HISTORY" in narrative paragraph form, detailing all reasons for the current visit, chief complaints, and a comprehensive history of presenting illness.
-            • Include mentioned negatives from exams and symptoms, as well as details on physical activities and exercise regimens, if mentioned.
-            • Only include information explicitly stated in the transcript or context.
-            • End with: "Review of systems is otherwise non-contributory."
-
-            ## Physical Examination:
-            • List under the heading "PHYSICAL EXAMINATION" in a short-paragraph narrative form.
-            • Include vital signs (blood pressure, heart rate, oxygen saturation), cardiac examination, respiratory examination, peripheral edema, and other exam insights only if explicitly mentioned in the transcript or context.
-            • If cardiac exam is not mentioned or normal, write: "Precordial examination was unremarkable with no significant heaves, thrills or pulsations. Heart sounds were normal with no significant murmurs, rubs, or gallops."
-            • If respiratory exam is not mentioned or normal, write: "Chest was clear to auscultation."
-            • If peripheral edema is not mentioned or normal, write: "No peripheral edema."
-            • Omit other physical exam insights if not mentioned.
-
-            ## Investigations:
-            • List under the heading "INVESTIGATIONS" in the following subcategories, each on a single line with findings and dates in parentheses followed by a colon:
-            • Laboratory investigations: List CBC, electrolytes, creatinine with GFR, troponins, NTpBNP or BNP level, A1c, lipids, and other labs in that order, if mentioned.
-            • ECGs: List ECG findings and dates.
-            • Echocardiograms: List echocardiogram findings and dates.
-            • Stress tests: List stress test findings (including stress echocardiograms and graded exercise challenges) and dates.
-            • Holter monitors: List Holter monitor findings and dates.
-            • Device interrogations: List device interrogation findings and dates.
-            • Cardiac perfusion imaging: List cardiac perfusion imaging findings and dates.
-            • Cardiac CT: List cardiac CT findings and dates.
-            • Cardiac MRI: List cardiac MRI findings and dates.
-            • Other investigations: List other relevant investigations and dates.
-            • Use verbatim text from contextual notes, updating only with new or differing transcript information.
-            • Ignore if no findings are mentioned.
-
-            ## Summary:
-            • List under the heading "SUMMARY" in a cohesive narrative paragraph.
-            • Start with: "[patient name] is a pleasant [age] year old [gender] that was seen today for cardiac assessment."
-            • Include: "Cardiac risk factors include [list risk factors]" if mentioned in the transcript or context.
-            • Summarize patient symptoms from the History section and cardiac investigations from the Investigations section, if mentioned.
-            • Omit risk factors or summary details if not mentioned.
-
-            ## Assessment/Plan:
-            • List under the heading "ASSESSMENT/PLAN" for each medical issue, structured as:
-            • [number.] [Condition]
-            • Assessment: [Current assessment of the condition, drawn from context and transcript]
-            • Plan: [Management plan, including investigations, follow-up, and reasoning for the plan, drawn from context and transcript. Include counselling details if mentioned.]
-            • Number each issue sequentially (e.g., 1., 2.) and ensure all information is explicitly mentioned in the transcript or context.
-
-            ## Follow-Up:
-            • List under the heading "FOLLOW-UP" any follow-up plans and time frames explicitly mentioned in the transcript.
-            • If no time frame is specified, write: "Will follow-up in due course, pending investigations, or sooner should the need arise."
-
-            ## Closing:
-            • End the report with: "Thank you for the privilege of allowing me to participate in [patient’s name] care. Feel free to reach out directly if any questions or concerns."
+            # Cardiology Consult Letter
+            
+            ## Reason for Referral
+            Include the specific reason why the patient was referred to cardiology. This may include symptoms (e.g., chest pain, palpitations), abnormal test results (e.g., ECG, echocardiogram), or concerns from the referring physician. [ Make it in a well-structured to the point paragraph form]
+            
+            ## History of Presenting Complaints
+            Describe the current cardiac-related symptoms the patient is experiencing. Include onset, duration, frequency, aggravating or relieving factors, and any associated symptoms (e.g., dizziness, dyspnea, syncope, fatigue). [ Make it in a well-structured to the point paragraph form]
+            
+            ## Past Medical History
+            Summarize relevant medical conditions, especially cardiovascular (e.g., hypertension, hyperlipidemia, diabetes, prior MI, stroke, heart failure). Include surgical history if related to cardiology. [ Make it in a well-structured to the point paragraph form]
+            
+            ## Family History
+            Note any history of cardiovascular diseases in first-degree relatives, such as coronary artery disease, sudden cardiac death, cardiomyopathy, or arrhythmias. [ Make it in a well-structured to the point paragraph form]
+            
+            ## Social History
+            Include lifestyle factors relevant to heart health:
+            Smoking status (current, past, never)
+            Alcohol intake 
+            Recreational drug use
+            Exercise habits
+            Occupation/stress etc if relevant
+            [ Make it in a well-structured to the point paragraph form]
+          
+            ## Medications
+            List all current medications, including dosage and frequency. Pay attention to cardiovascular drugs (e.g., statins, beta-blockers, ACE inhibitors, anticoagulants). Also include any over-the-counter or herbal supplements.
+           
+            ## Examinations
+            Summarize findings from the physical exam if mentioned:
+            Vital signs (BP, HR)
+            Cardiac exam (heart sounds, murmurs)
+            Peripheral pulses, edema, JVP
+            Respiratory or general observations etc if relevant
+            [ Make it in a well-structured to the point paragraph form with subheadings according to the case]
+            
+            ## Investigations
+            List relevant test results:
+            ECG findings
+            Echocardiogram
+            Blood tests (e.g., troponins, cholesterol)
+            Stress tests, Holter monitor, imaging studies etc. if available
+            [ Make it in a well-structured to the point paragraph form]
+            
+            ## Assessment and Evaluation
+            Provide a clinical interpretation of the case based on the information above. Mention possible diagnoses, cardiac risk assessment, or significant abnormalities.
+            [ Make it in a well-structured to the point paragraph form]
+           
+            ## Plan and Recommendation
+            Outline the next steps in management:
+            Further investigations required
+            Treatment changes or additions
+            Lifestyle recommendations
+            Follow-up plans
+            Referral to other specialties if needed
+            [ Make it in a well-structured to the point paragraph form with subheadings according to the case]
 
             Additional Instructions:
             - Ensure strict adherence to the template structure, maintaining the exact order and headings as specified.
-            - Use "•  " only where indicated (e.g., Assessment/Plan).
-            - Write in complete sentences for narrative sections (History, Social History, Physical Examination, Summary).
             - If data for any field is not available dont write anything under that heading and ignore it.
             - Ensure all sections are populated only with explicitly provided data, preserving accuracy and professionalism.
         """
@@ -4472,7 +4414,7 @@ async def stream_openai_report(transcription: dict, template_type: str) -> Async
         user_prompt, system_message = await fetch_prompts(transcription, template_type)
         main_logger.info(f"[OP-{operation_id}] Initiating OpenAI streaming for template: {template_type}")
         stream = await clients.chat.completions.create(  # No await here; it's an async generator
-            model="gpt-4o",
+            model="gpt-4.1",
             messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_prompt}
