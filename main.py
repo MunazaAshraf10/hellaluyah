@@ -303,138 +303,84 @@ async def root():
 @app.websocket("/ws/live-transcription")
 async def live_transcription_endpoint(websocket: WebSocket):
     client_id = str(uuid.uuid4())
-    print(f"\n🔌 New WebSocket connection request from client {client_id}")
-    print(f"📡 Client address: {websocket.client.host}:{websocket.client.port}")
-    
+    transcript_id = str(uuid.uuid4())  # Generate transcript ID early
+
+    main_logger.info(f"[{client_id}] New WebSocket connection")
+    time_logger.info(f"[{client_id}] Client: {websocket.client.host}:{websocket.client.port}")
+
     try:
         await manager.connect(websocket, client_id)
-        print(f"✅ Client {client_id} connected successfully")
-        
-        # Wait for configuration message from client
-        print(f"⏳ Waiting for configuration from client {client_id}")
+        main_logger.info(f"[{client_id}] Connected successfully")
+
         config_msg = await websocket.receive_text()
-        print(f"📥 Raw config message: {config_msg}")
-        
         try:
             config = json.loads(config_msg)
-            print(f"📝 Parsed configuration: {json.dumps(config, indent=2)}")
+            main_logger.info(f"[{client_id}] Config received: {config}")
         except json.JSONDecodeError as e:
-            print(f"❌ Failed to parse configuration: {e}")
-            print(f"Raw message was: {config_msg}")
-            raise
-        
-        # Acknowledge configuration
-        response = {
-            "status": "ready",
-            "message": "Ready to receive audio for real-time transcription"
-        }
-        print(f"📤 Sending response: {json.dumps(response, indent=2)}")
-        await websocket.send_text(json.dumps(response))
-        print(f"✅ Sent ready status to client {client_id}")
-        
-        # Initialize session data
-        session_data = manager.get_session_data(client_id)
-        print(f"📊 Initialized session data for client {client_id}")
-        
-        # Create an in-memory buffer to store audio data for S3 upload
-        audio_buffer = bytearray()
-        
-        # Connect to Deepgram WebSocket
-        print(f"🔌 Connecting to Deepgram for client {client_id}")
-        deepgram_url = f"wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=16000&channels=1&model=nova-2-medical&language=en&diarize=true&punctuate=true&smart_format=true"
-        print(f"🌐 Deepgram URL: {deepgram_url}")
-        
-        try:
-            deepgram_socket = await websockets.connect(
-                deepgram_url,
-                additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
-            )
-            print(f"✅ Connected to Deepgram for client {client_id}")
-        except Exception as e:
-            print(f"❌ Failed to connect to Deepgram: {str(e)}")
-            print(f"Error details: {traceback.format_exc()}")
+            error_logger.error(f"[{client_id}] JSON decode error: {e}")
             raise
 
-        # Start processing tasks
-        print(f"🚀 Starting processing tasks for client {client_id}")
+        await websocket.send_text(json.dumps({
+            "status": "ready",
+            "message": "Ready to receive audio for real-time transcription",
+            "transcript_id": transcript_id  # Send early
+        }))
+        main_logger.info(f"[{client_id}] Sent ready with transcript_id: {transcript_id}")
+
+        session_data = manager.get_session_data(client_id)
+        session_data["transcript_id"] = transcript_id  # Save early
+        manager.update_session_data(client_id, session_data)
+
+        audio_buffer = bytearray()
+
+        deepgram_url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=16000&channels=1&model=nova-2-medical&language=en&diarize=true&punctuate=true&smart_format=true"
+        deepgram_socket = await websockets.connect(
+            deepgram_url,
+            additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
+        )
+        main_logger.info(f"[{client_id}] Connected to Deepgram")
+
         await asyncio.gather(
             process_audio_stream(websocket, deepgram_socket, audio_buffer),
             process_transcription_results(deepgram_socket, websocket, client_id)
         )
 
-        # --- NEW: After streaming ends, save audio and transcript ---
-        print(f"💾 Saving complete audio and transcript for client {client_id}")
-        # Save audio to S3
         audio_info = await save_audio_to_s3(bytes(audio_buffer))
-        if not audio_info:
-            print(f"❌ Failed to save audio to S3 for client {client_id}")
+        if audio_info:
+            main_logger.info(f"[{client_id}] Audio saved: {audio_info}")
         else:
-            print(f"✅ Audio saved to S3 for client {client_id}: {audio_info}")
+            error_logger.error(f"[{client_id}] Audio saving failed")
 
-        # Save transcript to DynamoDB
-        session_data = manager.get_session_data(client_id)
-        transcript_data = session_data.get("transcription", {})
-        transcript_id = await save_transcript_to_dynamodb(
-            transcript_data,
-            audio_info,
-            status="completed"
-        )
-        print(f"✅ Transcript saved to DynamoDB for client {client_id} with transcript_id: {transcript_id}")
-        print(f"Transcript data: {transcript_data}")
-        # --- NEW: Send transcript_id to client ---
-        await websocket.send_text(json.dumps({
-            "type": "transcription_complete",
-            "transcript_id": transcript_id
-        }))
+        transcript_data = manager.get_session_data(client_id).get("transcription", {})
+        await save_transcript_to_dynamodb(transcript_data, audio_info, status="completed",transcript_id= transcript_id)
+        main_logger.info(f"[{client_id}] Transcript saved: {transcript_id}")
 
     except WebSocketDisconnect:
-        print(f"❌ Client {client_id} disconnected")
-        manager.disconnect(client_id)
+        main_logger.warning(f"[{client_id}] WebSocket disconnected")
     except Exception as e:
-        print(f"❌ Error in live transcription for client {client_id}: {str(e)}")
-        print(f"Error details: {traceback.format_exc()}")
-        manager.disconnect(client_id)
+        error_logger.error(f"[{client_id}] Unexpected error: {str(e)}\n{traceback.format_exc()}")
     finally:
-        print(f"🧹 Cleaning up resources for client {client_id}")
         manager.disconnect(client_id)
+        main_logger.info(f"[{client_id}] Cleaned up connection")
 
 async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buffer=None):
-    """Process incoming audio stream from client and forward to Deepgram."""
     try:
         while True:
-            print("🎤 Waiting for audio data from client...")
-            try:
-                message = await websocket.receive()
-                if "bytes" in message:
-                    data = message["bytes"]
-                    print(f"📥 Received {len(data)} bytes of audio data")
-                    
-                    if audio_buffer is not None:
-                        audio_buffer.extend(data)
-                    
-                    print("📤 Forwarding audio data to Deepgram...")
-                    await deepgram_socket.send(data)
-                    print("✅ Audio data forwarded to Deepgram")
-                elif "text" in message:
-                    # Handle text messages (like end_audio signal)
-                    text_data = message["text"]
-                    if text_data == '{"type":"end_audio"}':
-                        print("📤 Sending end_audio signal to Deepgram")
-                        await deepgram_socket.send(text_data)
-                        print("✅ End audio signal sent to Deepgram")
-                        break
-            except WebSocketDisconnect:
-                print("❌ Client disconnected")
-                break
-            except Exception as e:
-                print(f"❌ Error processing message: {str(e)}")
-                print(f"Error details: {traceback.format_exc()}")
-                break
-            
+            message = await websocket.receive()
+            if "bytes" in message:
+                data = message["bytes"]
+                audio_buffer.extend(data)
+                await deepgram_socket.send(data)
+            elif "text" in message:
+                if message["text"] == '{"type":"end_audio"}':
+                    await deepgram_socket.send(message["text"])
+                    await websocket.close()  
+                    main_logger.info("Received end_audio signal. Closing socket.")
+                    break
+    except WebSocketDisconnect:
+        main_logger.warning("WebSocket disconnected during audio stream")
     except Exception as e:
-        print(f"❌ Error in process_audio_stream: {str(e)}")
-        print(f"Error details: {traceback.format_exc()}")
-        raise
+        error_logger.error(f"Audio stream error: {str(e)}\n{traceback.format_exc()}")
 
 async def process_transcription_results(deepgram_socket, websocket, client_id):
     """Process transcription results from Deepgram and send to client."""
@@ -3725,19 +3671,19 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             user_instructions = f"""You are provided with a medical conversation transcript. 
             Analyze the transcript and generate a structured SOAP note following the specified template. 
             Use only the information explicitly provided in the transcript, and do not include or assume any additional details. 
-            Ensure the output is a valid TEXT/PLAIN object with the SOAP note sections (S, PMedHx, SocHx, FHx, O, A/P) as keys, formatted professionally and concisely in a doctor-like tone. 
-            Address all chief complaints and issues separately in the S and A/P sections unless clinically related (e.g., fatigue and headache due to stress). 
+            Ensure the output is a valid TEXT/PLAIN object with the SOAP note sections (Subjective, Past Medical History, Social History, Family History, Objective, Assessment & Plan) as keys, formatted professionally and concisely in a doctor-like tone. 
+            Address all chief complaints and issues separately in the Subjective and Assessment & Plan sections unless clinically related (e.g., fatigue and headache due to stress). 
             Make sure the output is in valid TEXT/PLAIN format. 
-            If the patient did not provide information for a section (S, PMedHx, SocHx, FHx, O, A/P), omit that section entirely without placeholders.
+            If the patient did not provide information for a section (Subjective, Past Medical History, Social History, Family History, Objective, Assessment & Plan ), omit that section entirely without placeholders.
             Convert all numbers to numeric format (e.g., 'five' to 5).
-            Ensure each point in S, PMedHx, SocHx, FHx, O starts with '•  ' (Unicode bullet point U+2022 followed by two spaces).
-            For A/P, use '•  ' for subheadings (Diagnosis, Differential Diagnosis, Investigations, Treatment, Referrals/Follow Up) and their content, ensuring no hyphens or other markers are used.
+            Ensure each point in Subjective, Past Medical History, Social History, Family History, Objective starts with '•  ' (Unicode bullet point U+2022 followed by two spaces).
+            For A/P, dont use '•  ' for subheadings (Diagnosis, Differential Diagnosis, Investigations, Treatment, Referrals/Follow Up) and use '•  ' with their content, ensuring no hyphens or other markers are used.
             Ensure A/P is concise with subheadings for each issue, avoiding repetition of content.
             Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
             Format dates as DD/MM/YYYY (e.g., 10/06/2025).
             Do not repeat anything in any heading also not across multiple headings.
             For temperature, use the unit provided in the transcript (e.g., Celsius or Fahrenheit); if Celsius is provided, do not convert to Fahrenheit unless explicitly stated.
-            Ensure no content is repeated across S, PMedHx, SocHx, FHx, O, A/P sections.
+            Ensure no content is repeated across Subjective, Past Medical History, Social History, Family History, Objective, Assessment & Plan sections.
             Below is the transcript:\n\n{conversation_text}
             
             Below are the report formatting structure:
@@ -3764,7 +3710,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
 
             # SOAP NOTE
 
-            ## S:
+            ## Subjective:
             List reasons for visit and chief complaints (e.g., symptoms, requests) concisely, grouping related symptoms (e.g., fatigue and headache) when clinically appropriate.
             Include duration, timing, quality, severity, and context for each complaint or group.
             Note factors that worsen or alleviate symptoms, including self-treatment attempts and effectiveness.
@@ -3777,7 +3723,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             Ensure you are not missing any point.
             Ensure each point starts with '•  ' and is concise, summarizing the issue in one line if possible.
 
-            ## PMedHx:
+            ## Past Medical History:
             List contributing factors, including past medical/surgical history, investigations, and treatments relevant to the complaints.
             Include exposure history if mentioned.
             Include immunization history and status if provided.
@@ -3791,21 +3737,21 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             If medications are taken, list name, dosage, and frequency.
             Ensure each point starts with '•  ' and is concise.
         
-            ## SocHx:
+            ## Social History:
             List social history relevant to the complaints.
             Only include this section if social history is relevant to the complaints.
             Keep each point concise and to the point and in new line with "•  " at the beginning of the line.
             Omit this section if no relevant social history is provided.
             Ensure each point starts with '•  ' and is concise.
         
-            ## FHx:
+            ## Family History:
             List family history relevant to the complaints.
             Only include this section if family history is relevant to the complaints.
             Keep each point concise and to the point and in new line with "•  " at the beginning of the line.
             Omit this section if no relevant family history is provided.
             Ensure each point starts with '•  ' and is concise.
         
-            O:
+            ## Objective:
             Include only objective findings explicitly mentioned in the transcription (e.g., vital signs, specific exam results).
             If vital signs are provided, report as: BP:, HR:, Wt:, T:, O2:, Ht:.
             If CVS exam is explicitly stated as normal, report as: “N S1 and S2, no murmurs or extra beats.”
@@ -3818,27 +3764,30 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             Omit this section if no objective findings are provided.
             Ensure each point starts with '•  ' and is concise.
 
-            A/P:
+            ## Assessment & Plan:
             For each issue or group of related complaints (list as 1, 2, 3, etc.):
             • State the issue or group of symptoms (e.g., “Fatigue and headache”).
             • Diagnosis: Provide the likely diagnosis (condition name only) with Diagnosis Heading only if the issue and diagnosis is contextually not the same, it will help in removal of duplication.
-            • Differential Diagnosis: List differential diagnoses.
+            • Differential Diagnosis: List differential diagnoses. (analyse the issue and point different diagnosis, make sure to add it)
             • Investigations: List planned investigations and if no investigations are planned then write nothing ignore the points related to investigations.
             • Treatments: List planned treatments if discussed in the conversation otherwise write nothing and ignore the points related to treatments.
             • Referrals/Follow Up: List relevant referrals and follow ups with timelines if mentioned otherwise write nothing and ignore the points related to referrals and follow ups.
             If the have multiple treatments then list them in new line.
-            Ensure each subheading and its content uses '•  ' and is concise, avoiding repetition.
+            Ensure each subheading's content starts with '•  ' and is concise, avoiding repetition.
             Align A/P with S, grouping related complaints unless explicitly separate.
+            Always include Differential Diagnosis.
+            List one subheading only once.
+            Dont add '•  '  with subheadings, just with its content add '•  ' .
         
 
             Instructions:
-            Output a valid TEXT/PLAIN object with keys: S, PMedHx, SocHx, FHx, O, A/P.
+            Output a valid TEXT/PLAIN object with keys: Subjective, Past Medical History, Social History, Family History, Objective, Assessment & Plan.
             Use only transcription data, avoiding invented details, assessments, or plans.
             Keep wording concise, mirroring the style of: “Fatigue and dull headache for two weeks. Ibuprofen taken few days ago with minimal relief.”
             Group related complaints (e.g., fatigue and headache due to stress) unless the transcription indicates distinct etiologies.
             In O, report only provided vitals and exam findings; do not assume normal findings unless explicitly stated.
             Ensure professional, doctor-like tone without verbose or redundant phrasing.
-            Dont repeat any thing in S, O and PMedHx, SocHx, FHx, i mean if something is taken care in objective (fulfills the purpose) then dont add in subjective and others.
+            Dont repeat any thing in Subjective, Past Medical History, Social History, Family History, and Objective, i mean if something is taken care in objective (fulfills the purpose) then dont add in subjective and others.
             Ensure bullet points use '•  ' consistently across all sections.
                                     
             Example for Reference (Do Not Use as Input):
@@ -3871,7 +3820,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
 
             # SOAP NOTE
 
-            ## S:
+            ## Subjective:
             •   Constant cough, shortness of breath, chest tightness for 6 days
             •  Initially thought to be cold, now worsening with fatigue on minimal exertion
             •  Yellowish-green sputum production
@@ -3879,21 +3828,21 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             •  Mild wheezing, chest heaviness, no sharp pain
             •  Son had severe cold last week
 
-            ## PMedHx:
+            ## Past Medical History:
             •  Mild asthma - uses albuterol inhaler 1-2 times weekly
             •  Type 2 diabetes - diagnosed 3 years ago
             •  Medications: Metformin 500mg BD
             •  No allergies
 
-            ## SocHx:
+            ## Social History:
             •  Ex-smoker, quit 10 years ago, smoked in college
 
-            ## O:  
+            ## Objective:  
             •  T: 38.1°C, RR: 22, O2 sat: 94%, HR: 92 bpm
             •  Wheezing and crackles in both lower lung fields
             •  Throat erythema with post-nasal drip
 
-            ## A/P:
+            ## Assessment & Plan:
             1. Acute bronchitis with asthma exacerbation
                Diagnosis: Complicated by diabetes
                Treatment: 
@@ -3948,7 +3897,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
 
             # SOAP NOTE
             
-            ## S:
+            ## Subjective:
             •  Persistent abdominal pain in right upper quadrant for 2 weeks, dull ache, 6/10 severity, worse after fatty foods. Antacids ineffective.
             •  Nausea present, no vomiting. Pale, greasy stools for 1 week. 5 lb weight loss.
             •  Fatigue affecting work performance as mechanic, difficulty concentrating, present for approximately 2 weeks.
@@ -3956,22 +3905,22 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             •  Chest discomfort described as pressure sensation, present for 1 week, occurs with fatigue/stress.
             •  Mild shortness of breath on exertion (climbing stairs).
 
-            ## PMedHx:
+            ## Past Medical History:
             •  Hypertension (diagnosed 5 years ago)
             •  Hepatitis C (10 years ago, treated and cured)
             •  Medications: Lisinopril 10mg daily
             •  Immunisations: Influenza vaccine last year, tetanus up to date
 
-            ## SocHx:
+            ## Social History:
             •  Mechanic
             •  Smoker (10 cigarettes/day for 20 years)
             •  Alcohol 1-2 drinks on weekends
 
-            ## FHx:
+            ## Family History:
             •  Father died of MI at age 50
             •  Mother has rheumatoid arthritis
 
-            ## O:
+            ## Objective:
             •  BP 140/90, HR 88, T 37.2°C, O2 96%, Wt 185 lbs, Ht 5'10"
             •  CVS: N S1 and S2, no murmurs or extra beats
             •  Resp: Chest clear, no decr breath sounds
@@ -3979,7 +3928,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             •  MSK: Mild swelling in both knees, no redness
             •  Skin: No rashes or lesions
 
-            A/P:
+            ## Assessment & Plan:
             1. Abdominal pain
             Suspected gallbladder disease (possibly gallstones) with history of Hepatitis C
             Investigations: LFTs, abdominal ultrasound
@@ -4009,7 +3958,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
 
             # SOAP NOTE
             
-            ## S:
+            ## Subjective:
             •  Fatigue and dull headache for two weeks.
             •  Initially attributed to stress, not improving.
             •  Ibuprofen taken few days ago with minimal relief.
@@ -4018,25 +3967,25 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             •  Sleep disturbance - waking during night, difficulty returning to sleep.
             •  Significant work stress, behind on deadlines.
 
-            ## PMedHx:
+            ## Past Medical History:
             •  Generally healthy.
             •  Multivitamin daily.
 
-            ## SocHx:
+            ## Social History:
             •  Work stress with deadlines.
 
-            ## FHx:
+            ## Family History:
             •  Father with hypertension.
 
-            ## O:
+            ## Objective:
             •  BP: 138/88 (elevated)
             •  HR: 92 (mild tachycardia)
             •  Investigations: None performed during visit.
 
-            ## A/P:
+            ## Assessment & Plan:
             1. Fatigue and headache
-            Possible stress-related symptoms
-            Differential diagnosis includes anaemia, thyroid dysfunction, infection
+            Diagnosis: Possible stress-related symptoms
+            Differential diagnosis: includes anaemia, thyroid dysfunction, infection
             Investigations: CBC, thyroid panel, metabolic panel
             Treatment: Advised to hydrate well, reduce caffeine and screen time before bed
             Results expected within 24-48 hours, to be communicated via call or patient portal
@@ -5074,6 +5023,8 @@ async def generate_report_from_transcription(transcription, template_schema, use
             If data for some heading is missing (not mentioned during session) then ignore that heading and dont include it in the output.
 
             Use '•  ' (Unicode bullet point U+2022 followed by two spaces) for all points in S, PMedHx, SocHx, FHx, O, and for A/P subheadings and their content.
+
+            Make sure to add proper identations
         
 """
        
