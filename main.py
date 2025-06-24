@@ -4558,20 +4558,21 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
 
                 [Issue 1 (issue, request, topic, or condition name)] Assessment:
                 [Likely diagnosis for Issue 1 (condition name only)]
-                [Differential diagnosis for Issue 1] (only if mentioned, otherwise blank) Diagnostic Tests: (omit section if not mentioned)
+                [Differential diagnosis for Issue 1] (analyse the case, and suggest) Diagnostic Tests: (omit section if not mentioned)
                 [Investigations and tests planned for Issue 1] (only if mentioned, otherwise blank) Treatment Plan:
                 [Treatment planned for Issue 1] (only if mentioned, otherwise blank)
                 [Relevant referrals for Issue 1] (only if mentioned, otherwise blank)
 
                 [Issue 2 (issue, request, topic, or condition name)] Assessment:
                 [Likely diagnosis for Issue 2 (condition name only)]
-                [Differential diagnosis for Issue 2] (only if mentioned, otherwise blank) Diagnostic Tests: (omit section if not mentioned)
+                [Differential diagnosis for Issue 2] (analyse the case, and suggest) Diagnostic Tests: (omit section if not mentioned)
                 [Investigations and tests planned for Issue 2] (only if mentioned, otherwise blank) Treatment Plan:
                 [Treatment planned for Issue 2] (only if mentioned, otherwise blank)
                 [Relevant referrals for Issue 2] (only if mentioned, otherwise blank)
                 [Additional issues (3, 4, 5, etc., as needed)] Assessment:
+                
                 [Likely diagnosis for Issue 3, 4, 5, etc.]
-                [Differential diagnosis] (only if mentioned, otherwise blank) Diagnostic Tests: (omit section if not mentioned)
+                [Differential diagnosis] (analyse the case, and suggest) Diagnostic Tests: (omit section if not mentioned)
                 [Investigations and tests planned] (only if mentioned, otherwise blank) Treatment Plan:
                 [Treatment planned] (only if mentioned, otherwise blank)
                 [Relevant referrals] (only if mentioned, otherwise blank)
