@@ -1752,34 +1752,76 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
 
         formatting_instructions = """You are an AI model tasked with generating structured reports. Follow strict formatting rules as outlined below:
 
-            Headings must begin with # followed by a space.
-            Example:
+            Headings must begin with # followed by a space.  
+            Example:  
             # Clinical Summary
 
-            Subheadings must begin with ## followed by a space.
-            Example:
+            Subheadings must begin with ## followed by a space.  
+            Example:  
             ## Patient History
 
-            For lists or key points:
-            Each point must start with one level of indentation (2 spaces) followed by a bullet point (•) and a space. Make sure it is bullet.
-            Use this format only for distinct items or short, listed information.
-            Example:
-            • Patient reported mild headache
-            • No known drug allergies
-            
-            For paragraphs or multiple sentences, do not use bullets or indentation. Just write in standard paragraph form.
+            **Spacing and Indentation Rules:**  
+            •  Always add **one blank line** after a heading or subheading before starting the content.  
+            •  Never start content directly under the heading on the same line.  
+            •  Do not indent the start of paragraphs. Paragraph content should be aligned left.  
+            •  For bullet points, indent with exactly **2 spaces**, followed by a bullet (•), then 2 spaces.  
+            •  Do not add extra indentation beyond this for bullets or paragraphs.  
+            •  Maintain consistent alignment throughout the document.
 
-            Never mix bullets and paragraphs. If it's a narrative, use plain text. If it's a list of discrete points, follow the bullet format.
+            For lists or key points:  
+            Use only when there are distinct, separate items (e.g., symptoms, findings, medications).  
+            Each point must:  
+            •  Start with exactly one level of indentation (2 spaces)  
+            •  Use '•  ' (Unicode bullet point U+2022) followed by two spaces
+            •  Be a short, clear item or statement  
 
-            Stick to this formatting exactly in every section of the report.
+            Example:  
+            •  Patient reported mild headache  
+            •  No known drug allergies  
 
-            If data for some heading is missing (not mentioned during session) then ignore that heading and dont include it in the output.
+            For paragraphs or multiple sentences (narratives):  
+            •  Do not use bullets or indentation  
+            •  Just write in standard paragraph form, aligned left  
+            •  Separate paragraphs with a blank line if needed
 
-            Use '•  ' (Unicode bullet point U+2022 followed by two spaces) for all points in S, PMedHx, SocHx, FHx, O, and for A/P subheadings and their content.
-        
+            **Do NOT mix bullet points and narrative in the same section.**  
+            Use either bullets for itemized info or plain text for narrative – never both.
+
+            If data for some heading is missing (not mentioned during session), then **omit that heading** entirely from the output.
+
+            Stick to this formatting **exactly** in every section of the report.
 """
         
         date_instructions = DATE_INSTRUCTIONS.format(reference_date=current_date)
+      
+        user_prompt = f"""
+            You are provided with a medical conversation transcript. 
+            Analyze the transcript and generate a structured report following the specified template: {template_type.replace("_", " ").upper()}.
+
+            Use only the information explicitly provided in the transcript. Do not assume or invent any details.  
+            Ensure the output is a valid TEXT/PLAIN format with clearly defined sections matching the template.
+
+            Guidelines:
+            - If information is missing for a section, **omit that section entirely** from the output.
+            - Use **numeric format** for all numerical data (e.g., age, dosage, duration).
+            - Keep content **concise, professional, and in a doctor-like tone**.
+            - **Summarize and synthesize** the transcript intelligently to produce a practical report that would help a clinician quickly understand the patient's case.
+            - Add any **time-related** details from the transcript (e.g., duration of symptoms, date of procedures) clearly.
+            - Use appropriate **medical terminology**.
+            - The output **must be in valid TEXT format**, structured per the specified template.
+            - Structure the content as **bullet points or concise paragraphs** as per professional reporting standards.
+            - Do **not** repeat or paraphrase the conversation; instead, transform it into a professional summary from a clinician’s perspective.
+            - Use {current_date if current_date else "the current date"} as the reference point for any relative time expressions.
+            - Make it grammatically accurate and as best as possible, never miss any important perspective and never repeat anything in any section. 
+            - Ignore the headings for which data is not available
+            - Never use ('- ') always use bullets for points.
+
+            Transcript:
+            {conversation_text}
+
+            Date Instructions:
+            {date_instructions}
+            """
 
         # Template-specific instructions and schema
         if template_type == "soap_note":
@@ -1900,6 +1942,1220 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             - Follow-up in one week to discuss results, or sooner if symptoms worsen.
             """
         
+        elif template_type == "cardiology_consult":
+            current_date = None
+            if "metadata" in transcription and "current_date" in transcription["metadata"]:
+                current_date = transcription["metadata"]["current_date"]
+                main_logger.info(f"[OP-{operation_id}] Using current_date from metadata: {current_date}")
+            
+
+            user_instructions= f"""You are provided with a medical conversation transcript. 
+            Analyze the transcript and generate a structured CARDIOLOGY CONSULT NOTE following the specified template. 
+            Use only the information explicitly provided in the transcript, and do not include or assume any additional details. 
+            Ensure the output is a valid JSON object with the CARDIOLOGY CONSULT NOTE sections formatted professionally and concisely in a doctor-like tone. 
+            Make sure the output is in valid JSON format. 
+            If the patient didnt provide the information regarding any section then ignore the respective section.
+            Include the all numbers in numeric format.
+            Make sure the output is concise and to the point.
+            ENsure the data in each section should be to the point and professional.
+            Make it useful as doctors perspective so it makes there job easier, dont just dictate and make a note, analyze the conversation, summarize it and make a note that best desrcibes the patient's case as a doctor's perspective.
+            Add time related information in the report dont miss them.
+            Make sure the point are concise and structured and looks professional.
+            Use medical terms to describe each thing.
+            Follow strictly the format given below, and always written same output format.
+            If data for any field is not available dont write anything under that heading and ignore it.
+            Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
+            Below is the transcript:\n\n{conversation_text}
+            """
+            system_message = f"""You are a medical documentation assistant tasked with generating a detailed and structured cardiac assessment report based on a predefined template. 
+            Your output must maintain a professional, concise, and doctor-like tone, avoiding verbose or redundant phrasing. 
+            All information must be sourced exclusively from the provided transcript, contextual notes, or clinical notes, and only explicitly mentioned details should be included. 
+            If information for a specific section or placeholder is unavailable, Ignore that heading.
+            Do not invent or infer patient details, assessments, plans, interventions, or follow-up care beyond what is explicitly stated. 
+            If data for any field is not available dont write anything under that heading and ignore it.
+           
+            Date Handling Instructions:
+                Use {current_date if current_date else "the current date"} as the reference date for all temporal expressions in the transcription.
+                Convert relative time references to specific dates based on the reference date:
+                    "This morning," "today," or similar terms refer to the reference date.
+                    "X days ago" refers to the reference date minus X days (e.g., "five days ago" is reference date minus 5 days).
+                    "Last week" refers to approximately 7 days prior, adjusting for specific days if mentioned (e.g., "last Wednesday" is the most recent Wednesday before the reference date).
+                Format all dates as DD/MM/YYYY (e.g., 10/06/2025) in the CARDIOLOGY LETTER output.
+                Do not use hardcoded dates or assumed years unless explicitly stated in the transcription.
+                Verify date calculations to prevent errors, such as incorrect years or misaligned days.
+            {preservation_instructions} {grammar_instructions}
+            Follow the structured guidelines below for each section of the report:
+
+            1. Reason For Visit:
+            - describe the reason for visit
+
+            2. Cardiac Risk Factors:
+            - List under the heading "CARDIAC RISK FACTORS" in the following order: Increased BMI, Hypertension, Dyslipidemia, Diabetes mellitus, Smoker, Ex-smoker, Family history of atherosclerotic disease in first-degree relatives.
+            - For each risk factor, use verbatim text from contextual notes if available, updating only with new or differing information from the transcript.
+            - If no information is provided in the transcript or context, write "None known" for each risk factor.
+            - For Smoker, include pack-years, years smoked, and number of cigarettes or packs per day if mentioned in the transcript or context.
+            - For Ex-smoker, include only if the patient is not currently smoking. State the year quit and whether they quit remotely (e.g., "quit remotely in 2015") if mentioned. Omit this section if the patient is a current smoker.
+            - For Family history of atherosclerotic disease, specify if the patient’s mother, father, sister, brother, or child had a myocardial infarction, coronary angioplasty, coronary stenting, coronary bypass, peripheral arterial procedure, or stroke prior to age 55 (men) or 65 (women), as mentioned in the transcript or context.
+
+            3. Cardiac History:
+            - List under the heading "CARDIAC HISTORY" all cardiac diagnoses in the following order, if mentioned: heart failure (HFpEF or HFrEF), cardiomyopathy, arrhythmias (atrial fibrillation, atrial flutter, SVT, VT, AV block, heart block), devices (pacemakers, ICDs), valvular disease, endocarditis, pericarditis, tamponade, myocarditis, coronary disease.
+            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            - For heart failure, specify HFpEF or HFrEF and include ICD implantation details (date and model) if mentioned.
+            - For arrhythmias, include history of cardioversions and ablations (type and date) if mentioned.
+            - For AV block, heart block, or syncope, state if a pacemaker was implanted, including type, model, and date, if mentioned.
+            - For valvular heart disease, note the type of intervention (e.g., valve replacement) and date if mentioned.
+            - For coronary disease, summarize previous angiograms, coronary anatomy, and interventions (angioplasty, stenting, CABG) with graft details and dates if mentioned.
+            - Omit this section entirely if no cardiac history is mentioned in the transcript or context.
+
+            4. Other Medical History:
+            - List under the heading "OTHER MEDICAL HISTORY" all non-cardiac diagnoses and previous surgeries with associated years if mentioned.
+            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            - Ignore no non-cardiac medical history is mentioned in the transcript or context.
+
+            5. Current Medications:
+            - List under the heading "CURRENT MEDICATIONS" in the following subcategories, each on a single line:
+                - Antithrombotic Therapy: Include aspirin, clopidogrel, ticagrelor, prasugrel, apixaban, rivaroxaban, dabigatran, edoxaban, warfarin.
+                - Antihypertensives: Include ACE inhibitors, ARBs, beta blockers, calcium channel blockers, alpha blockers, nitrates, diuretics (excluding furosemide, e.g., HCTZ, chlorthalidone, indapamide).
+                - Heart Failure Medications: Include Entresto, SGLT2 inhibitors, mineralocorticoid receptor antagonists, furosemide, metolazone, ivabradine.
+                - Lipid Lowering Medications: Include statins, ezetimibe, PCSK9 modifiers, fibrates, icosapent ethyl.
+                - Other Medications: Include any medications not listed above.
+            - For each medication, include dose, frequency, and administration if mentioned, and note the typical recommended dosage per tablet or capsule in parentheses if it differs from the patient’s dose.
+            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            - Ignore each subcategory if no medications are mentioned.
+
+            6. Allergies and Intolerances:
+            - List under the heading "ALLERGIES AND INTOLERANCES" in sentence format, separated by commas, with reactions in parentheses if mentioned (e.g., "penicillin (rash), sulfa drugs (hives)").
+            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            - Ignore if no allergies or intolerances are mentioned.
+
+            7. Social History:
+            - List under the heading "SOCIAL HISTORY" in a short-paragraph narrative form.
+            - Include living situation, spousal arrangements, number of children, working arrangements, retirement status, smoking status, alcohol use, illicit or recreational drug use, and private drug/health plan status, if mentioned.
+            - For smoking, write "Smoking history as above" if the patient smokes or is an ex-smoker; otherwise, write "Non-smoker."
+            - For alcohol, specify the number of drinks per day or week if mentioned.
+            - Include comments on activities of daily living (ADLs) and instrumental activities of daily living (IADLs) if relevant.
+            - Use verbatim text from contextual notes, updating only with new or differing transcript information.
+            - Ignore this subheading if no social history is mentioned.
+
+            8. History:
+            - List under the heading "HISTORY" in narrative paragraph form, detailing all reasons for the current visit, chief complaints, and a comprehensive history of presenting illness.
+            - Include mentioned negatives from exams and symptoms, as well as details on physical activities and exercise regimens, if mentioned.
+            - Only include information explicitly stated in the transcript or context.
+            - End with: "Review of systems is otherwise non-contributory."
+
+            9. Physical Examination:
+            - List under the heading "PHYSICAL EXAMINATION" in a short-paragraph narrative form.
+            - Include vital signs (blood pressure, heart rate, oxygen saturation), cardiac examination, respiratory examination, peripheral edema, and other exam insights only if explicitly mentioned in the transcript or context.
+            - If cardiac exam is not mentioned or normal, write: "Precordial examination was unremarkable with no significant heaves, thrills or pulsations. Heart sounds were normal with no significant murmurs, rubs, or gallops."
+            - If respiratory exam is not mentioned or normal, write: "Chest was clear to auscultation."
+            - If peripheral edema is not mentioned or normal, write: "No peripheral edema."
+            - Omit other physical exam insights if not mentioned.
+
+            10. Investigations:
+                - List under the heading "INVESTIGATIONS" in the following subcategories, each on a single line with findings and dates in parentheses followed by a colon:
+                - Laboratory investigations: List CBC, electrolytes, creatinine with GFR, troponins, NTpBNP or BNP level, A1c, lipids, and other labs in that order, if mentioned.
+                - ECGs: List ECG findings and dates.
+                - Echocardiograms: List echocardiogram findings and dates.
+                - Stress tests: List stress test findings (including stress echocardiograms and graded exercise challenges) and dates.
+                - Holter monitors: List Holter monitor findings and dates.
+                - Device interrogations: List device interrogation findings and dates.
+                - Cardiac perfusion imaging: List cardiac perfusion imaging findings and dates.
+                - Cardiac CT: List cardiac CT findings and dates.
+                - Cardiac MRI: List cardiac MRI findings and dates.
+                - Other investigations: List other relevant investigations and dates.
+                - Use verbatim text from contextual notes, updating only with new or differing transcript information.
+                - Ignore each subcategory if no findings are mentioned.
+
+            11. Summary:
+                - List under the heading "SUMMARY" in a cohesive narrative paragraph.
+                - Start with: "[patient name] is a pleasant [age] year old [gender] that was seen today for cardiac assessment."
+                - Include: "Cardiac risk factors include [list risk factors]" if mentioned in the transcript or context.
+                - Summarize patient symptoms from the History section and cardiac investigations from the Investigations section, if mentioned.
+                - Omit risk factors or summary details if not mentioned.
+                [make it in a paragraph form]
+
+            12. Assessment/Plan:
+                - List under the heading "ASSESSMENT/PLAN" for each medical issue, structured as:
+                - #[number] [Condition]
+                - Assessment: [Current assessment of the condition, drawn from context and transcript]
+                - Plan: [Management plan, including investigations, follow-up, and reasoning for the plan, drawn from context and transcript. Include counselling details if mentioned.]
+                - Number each issue sequentially (e.g., #1, #2) and ensure all information is explicitly mentioned in the transcript or context.
+
+            13. Follow-Up:
+                - List under the heading "FOLLOW-UP" any follow-up plans and time frames explicitly mentioned in the transcript.
+                - If no time frame is specified, write: "Will follow-up in due course, pending investigations, or sooner should the need arise."
+
+            Additional Instructions:
+            - Ensure strict adherence to the template structure, maintaining the exact order and headings as specified.
+            - Use "•  " only where indicated (e.g., Assessment/Plan, Current Medications etc).
+            - Write in complete sentences for narrative sections (History, Social History, Physical Examination, Summary).
+            - If data for any field is not available dont write anything under that heading and ignore it.
+            - Ensure all sections are populated only with explicitly provided data, preserving accuracy and professionalism.
+        """
+       
+        elif template_type =="echocardiography_report_vet":
+            user_instructions = user_prompt
+
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
+
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
+
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Echocardiography Report Template STructure:
+
+            # VET Echocardiography Report
+
+            ## Patient Information:
+            - [Patient name]
+            - [Species]
+            - [Breed]
+            - [Age]
+            - [Sex]
+            - [Weight]
+
+            Date of Examination: [DD/MM/YYYY]
+
+            ## Reason for Echocardiography: [Brief description of presenting complaint or reason for referral]
+
+            ## Echocardiographic Findings:
+
+            1. Left Atrium and Ventricle:
+            - [Left atrial size]
+            - [Left ventricular size]
+            - [Left ventricular wall thickness]
+            - [Fractional shortening]
+
+            2. Right Atrium and Ventricle:
+            - [Right atrial size]
+            - [Right ventricular size]
+            - [Right ventricular wall thickness]
+
+            3. Valves:
+            - [Mitral valve]
+            - [Tricuspid valve]
+            - [Aortic valve]
+            - [Pulmonic valve]
+
+            4. Great Vessels:
+            - [Aorta]
+            - [Pulmonary artery]
+
+            5. Doppler Studies:
+            - [Mitral inflow]
+            - [Tricuspid inflow]
+            - [Aortic outflow]
+            - [Pulmonic outflow]
+
+            6. Other Findings:
+            - [Pericardial effusion]
+            - [Cardiac masses]
+            - [Congenital defects]
+
+            ## Measurements:
+            [List relevant measurements, e.g., LA/Ao ratio, EPSS, etc.]
+
+            ## Interpretation:
+            [Brief summary of significant findings and their clinical relevance]
+
+            ## Diagnosis:
+            [Primary echocardiographic diagnosis]
+
+            ## Recommendations:
+            [Suggested follow-up, treatment, or further diagnostics if applicable]
+
+            Report prepared by: [Clinician's Name]
+            Date: [DD/MM/YYYY]
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+
+        elif template_type =="cardio_consult":
+            user_instructions = user_prompt
+
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
+
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
+
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Cardio Consult Template STructure:
+
+            # Cardio Consult
+
+            ## Subjective: 
+            - [describe current cardiovascular issues, reasons for visit, discussion topics, history of presenting complaints etc] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [describe past medical history, previous cardiovascular surgeries] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [mention cardiovascular medications and herbal supplements] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [describe social history relevant to cardiovascular health] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [mention allergies] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Objective: 
+            - [vital signs including blood pressure, heart rate, respiratory rate, temperature] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [physical examination findings relevant to cardiovascular system] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [results of recent cardiovascular tests and investigations] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Assessment: 
+            - [diagnosis or differential diagnosis related to cardiovascular issues] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [summary of clinical findings and their implications] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Plan: 
+            - [treatment plan including medications, lifestyle modifications, and follow-up appointments] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [referrals to other specialists or for further investigations] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [patient education and counselling provided] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+
+        elif template_type =="cardio_patient_explainer":
+            user_instructions = user_prompt
+
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
+
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
+
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Cardio Patient Explainer Template STructure:
+
+            # Cardio Patient Explainer
+
+            Dear [Patient's Name], (Write [Patient's Name] place holder if patient name is not known)
+
+            It was a pleasure to see you today and review your health concerns. I truly appreciate the time you took to share details about your health and personal life. I’ve summarized our discussion below to ensure you have a clear understanding of what we talked about during your visit.
+
+            ## 1. [Topic/Issue #1: Description]
+            During our discussion, we talked about [describe the first topic/issue in simple terms]. This means [explain the condition, symptom, or topic in layperson's terms]. It is important to [describe any actions, reasons for concern, or key details to remember]. [If applicable, mention treatments and medication dosage, lifestyle adjustments, or monitoring required.]
+
+            ## 2. [Topic/Issue #2: Description]
+            Another key point we covered was [describe the second topic/issue]. This relates to [explain in simple language]. You may notice [describe symptoms or improvements to monitor] and should consider [mention treatments and medication dosage, advice, or follow-ups if relevant].
+
+            ## 3. [Topic/Issue #3: Description]
+            We also discussed [describe the third topic/issue, if applicable]. To address this, [lay out the plan or approach discussed, with clear explanations]. [Include any specific recommendations for actions or observations.]
+
+            [Add more topics as needed, following the same format.]
+
+            ## Next Steps:
+            [Summarize the specific next actions for the patient, such as “Please remember to schedule your follow-up appointment in two weeks,” or “Don’t forget to start the medication as prescribed and let us know if you experience any side effects.”]
+
+            Thank you for trusting me with your care. If you have any questions or concerns about anything we discussed, please do not hesitate to reach out.
+
+            Warm regards,
+            [Dr. Clinician name] (Write [Dr. Clinician name] place holder if patient name is not known)
+
+            (Never come up with your own patient details, assessment, diagnosis, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes or clinical note as a reference for the information include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes or clinical note, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+
+        elif template_type =="coronary_angiograph_report":
+            user_instructions = user_prompt
+
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
+
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
+
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Coronary Angiograph Report Template STructure:
+
+            # Coronary Angiograph Report 
+
+            ## Indication
+            [Describe the clinical reason for coronary angiography (e.g., chest pain, abnormal stress test, suspected CAD)]
+            (Include only if explicitly mentioned in the transcript, contextual notes, or clinical note)
+
+            ## Access & Setup
+            [Specify access site (e.g., right radial, femoral), sheath size, and catheter types used]
+            [Make it in a Paragraph-form]
+
+            [Mention local anaesthesia and any preparation steps taken]
+            [Make it in a Paragraph-form]
+            (Include only if mentioned)
+
+            ## Sedation & Medications Administered
+            [List all procedural medications and dosages: e.g., heparin, GTN, sedatives, analgesics, contrast volume]
+            (Include only if mentioned)
+
+            ## Procedure Performed
+            [State procedure type: diagnostic angiography, PCI, etc.]
+            (Include only if mentioned)
+
+            ## Findings
+            Provide structured findings for each artery and any relevant tests:
+
+            1. Left Main Coronary Artery (LM):
+                [Size, branching, disease status]
+
+            2. Left Anterior Descending Artery (LAD):
+                [Size, flow (TIMI), stenosis, plaque, anomalies]
+
+            3. Left Circumflex Artery (LCX):
+                [Dominance, size, flow, disease]
+
+            4. Right Coronary Artery (RCA):
+                [Dominance, size, flow, disease]
+
+            5. Other vessels / grafts (if applicable):
+                [e.g., SVGs, LIMA]
+
+            6. Left Ventriculogram / Aortogram / LHS Function:
+                [Performed or not, and results if available]
+                (Include only if explicitly documented for each item above)
+
+            ## Closure Technique
+            [Describe haemostasis method used (e.g., TR band), result, and patient instructions]
+            (Include only if mentioned)
+
+            ## Complications
+            [State if any intra/post-procedural complications occurred. Write "None" only if explicitly stated.]
+            (Omit section if not mentioned)
+
+            ## Conclusion / Summary
+            [Summarize the overall angiographic findings and general interpretation]
+            (Include only if present)
+
+            ## Recommendations / Next Steps
+            [Document recommended clinical pathway, medications, risk factor management, or follow-up plans]
+            (Include only if present)
+
+            (Never come up with your own patient details, assessment, diagnosis, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes or clinical note as a reference for the information include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes or clinical note, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+
+        elif template_type =="left_heart_catheterization":
+            user_instructions = user_prompt
+
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
+
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
+
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Left Heart Catheterization Report Template STructure:
+
+            # Left Heart Catheterization Report 
+
+            Patient is a [Patient Age and gender] with a past medical history of [Past Medical History] who presents for diagnostic coronary artery catheterization with possible intervention due to [mention clinical reason for intervention].
+
+            ## Summary:
+            - [Summary of main interventions including lesion percent stenosis, location in vessel, PTCA balloon, DES stent used, balloon pump placement, impella placement] (After I say "in summary" please summarize that statement and place it here as well, only if I mention "in summary")
+            - [Include LVEDP in units of mm Hg] (only include in this section if LVEDP is mentioned)
+            - [Include LV EF or ejection fraction in units of %] (only include in this section if LV EF or ejection fraction is mentioned)
+
+            ## Right Heart Catheterization: (only include this section if right heart catheterization is mentioned as a procedure performed)
+            - RA Pressure: [include RA pressure in units of mm Hg] (only include if RA pressure mentioned)
+            - RV Pressure: [include RV pressure in units of mm Hg] (only include if RV pressure mentioned)
+            - PA Pressure: [include PA pressure in units of mm Hg] (only include if PA pressure mentioned)
+            - PCWP: [include PCWP pressure in units of mm Hg] (only include if PCWP pressure mentioned)
+            - PA Saturation: [include PA saturation in units of %] (only include if PA saturation mentioned)
+            - RA Saturation:  [include RA saturation in units of %] (only include if RA saturation mentioned)
+            - CO:  [include cardiac output (CO) in units of L/min] (only include if CO (cardiac output) mentioned)
+            - CI: [include cardiac index (CI) in units of L/min/m^2] (only include if CI (cardiac index) mentioned)
+
+            ## Procedures Performed:
+            - [Procedure 1] ([Catheter 1]) (only include [Procedure 1] ([Catheter 1]) if it has been explicitly mentioned in the transcript, contextual notes or clinical note, otherwise omit completely.)
+            - [Procedure 2] ([Catheter 2]) (only include [Procedure 2] ([Catheter 2]) if it has been explicitly mentioned in the transcript, contextual notes or clinical note, otherwise omit completely.)
+            - [Procedure 3] ([Catheter 3]) (only include [Procedure 3] ([Catheter 3]) if it has been explicitly mentioned in the transcript, contextual notes or clinical note, otherwise omit completely.)
+            (use as many bullet points as needed to comprehensively capture the procedures performed and catheters used)
+
+            ## Interventions: (only include if specific details below are mentioned)
+            -Lesion Location: [mention which vessel treated and which segment of it, and what the percent stenosis is]
+            -Guide: [mention which guide catheter used for intervention]
+            -Wire: [mention which coronary wire used for intervention]
+            -Imaging: (only mention if intracoronary imaging used such as IVUS or OCT used) [mention if any intracoronary imaging used such as IVUS, or OCT, and mention the details regarding the MLA, MSA and morphology of the lesion]
+            -Physiological Testing: (only mention if IFR or FFR used) [Mention the IFR or FFR values that were obtained)
+            -PTCA Pre: (only mention if there was pre-dilatation of the lesion with a balloon) [mention which balloon was used including the size and type]
+            -DES: (only mention if there was treatment of the lesion with a stent or DES) [mention which stent or DES was used including the size and type, even if multiple, list them all]
+            -PTCA Post: (only mention if there was post dilatation of a stent placed in the lesion with a balloon) [mention which balloon was used including the size and type]
+            -Stenosis: Pre: [mention the stenosis percentage before intervention]  Post: [mention the stenosis percentage after intervention]
+            -TIMI grade: Pre: [mention the TIMI grade (0,1,2 or 3) before intervention] Post:  [mention the TIMI grade (0,1,2 or 3) before intervention]
+
+            ## Recommendations:
+            -ASA + [anti-platelet medication ordered after intervention besides aspirin (such as brilinta, plavix, effient or integrilin)] (only include if second antiplatelet besides plavix mentioned) for 12 months; high-intensity statin, beta blocker
+            -IV fluids post-catheterization per Poseidon protocol
+            -Monitor access site above per protocol
+            -Monitor vitals, telemetry, labs with renal function & CBC
+            -Risk factor management with lifestyle modifications - diet, exercise, weight loss, medical compliance
+            -Follow-up in cardiology outpatient clinic in 1 week after discharge with primary cardiologist.
+
+            ## Coronary Anatomy:
+                Dominance: [Mention dominance of coronary anatomy]
+                Left Main Coronary Artery: [mention what the anatomy of the left main coronary artery is] (only include if mentioned)
+                Left Anterior Descending Coronary Artery:  [mention what the anatomy of the left anterior descending coronary artery is] (only include if mentioned)
+                Ramus Intermedius: [mention what the anatomy of the ramus intermedius coronary artery is] (only include if mentioned)
+                Left Circumflex Coronary Artery:  [mention what the anatomy of the left circumflex coronary artery is] (only include if mentioned)
+                Right Coronary Artery:  [mention what the anatomy of the left main coronary artery is] (only include if mentioned)
+
+            [Clinician name]
+            [Clinician credentials]
+
+            (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes or clinical note as a reference for the information include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes or clinical note, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)(Use as many full sentences as needed to capture all the relevant information from the transcript.)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+
+        elif template_type =="right_and_left_heart_study ":
+            user_instructions = user_prompt
+
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
+
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
+
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Right and Left Heart Study Report Template STructure:
+
+            # Right and Left Heart Study Report 
+
+            ## Clinical Indication
+                [Document the reason for the procedure — e.g., shortness of breath, rule out pulmonary hypertension]
+                (Only include if explicitly mentioned in transcript, contextual notes, or clinical note)
+
+            ## Procedure Performed
+                [State the procedure type — e.g., right and left heart catheterisation]
+                (Include only if mentioned)
+
+            ## Technique & Access
+                [Detail vascular access (e.g., femoral vein/artery), catheter types (e.g., Swan-Ganz, pigtail), sheath size, and procedural medications like heparin]
+                (Only include if mentioned)
+
+            ## Hemodynamic Measurements
+                Include only the values explicitly stated in the transcript or notes:
+
+                Aorta Pressure: [e.g., 120/80 mmHg]
+                Left Ventricle (LV): [e.g., 120/10 mmHg]
+                Left Ventricular End Diastolic Pressure (LVEDP): [e.g., 12 mmHg]
+                Right Atrium (RA): [e.g., 5 mmHg]
+                Right Ventricle (RV): [e.g., 25/5 mmHg]
+                Right Ventricular End Diastolic Pressure (RVEDP): [e.g., 6 mmHg]
+                Pulmonary Artery Pressure (PA): [e.g., 25/10 mmHg]
+                Pulmonary Artery Mean Pressure (PAMP): [e.g., 15 mmHg]
+                Pulmonary Capillary Wedge Pressure (PCWP): [e.g., 12 mmHg]
+                Cardiac Output (Thermodilution): [e.g., 5.2 L/min]
+                (Omit fields with no data)
+
+            ## Oximetry / Saturation Data
+                Include only if values are given:
+
+                Pulmonary Artery Saturation:
+                Right Ventricle Saturation:
+                Right Atrium Saturation:
+                Superior Vena Cava Saturation:
+                Inferior Vena Cava Saturation:
+                Femoral Artery Saturation:
+                (Only include if values are mentioned)
+
+            ## Closure Technique
+                [Describe haemostasis method — e.g., Angio-Seal, manual compression, site-specific details]
+                (Include only if mentioned)
+
+            ## Conclusion / Summary
+                [Summarize findings — e.g., no evidence of pulmonary hypertension, normal cardiac output, pressure gradients, or abnormal hemodynamics]
+                (Include only if explicitly mentioned)
+
+            (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes or clinical note as a reference for the information include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes or clinical note, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)(Use as many full sentences as needed to capture all the relevant information from the transcript.)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+
+        elif template_type =="toe_guided_cardioversion_report":
+            user_instructions = user_prompt
+
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
+
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
+
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Toe Guided Cardioversion Report Template STructure:
+
+            # Toe Guided Cardioversion Report 
+
+            ## Clinical Indication
+            [State the reason for the procedure — e.g., atrial fibrillation, flutter, pre-cardioversion assessment]
+            (Include only if explicitly mentioned in transcript, contextual notes, or clinical note)
+
+            ## Procedure Description
+            [Describe the overall procedure — e.g., TOE-guided cardioversion performed under anaesthesia, location, setting, and airway management such as intubation]
+            (Include only if mentioned)
+
+            ## Transoesophageal Echocardiogram Findings
+            [Mention key findings from TOE — e.g., presence or absence of intracardiac thrombus]
+            (Include only if explicitly mentioned)
+
+            ## ECG Findings Before Cardioversion
+            [Document rhythm (e.g., atrial fibrillation), heart rate, and any other relevant pre-cardioversion ECG features]
+            (Include only if available)
+
+            ## Cardioversion Details
+            [Specify number of shocks, energy level (e.g., 200J biphasic), and result (e.g., restoration of sinus rhythm)]
+            (Include only if explicitly mentioned)
+
+            ## Complications
+            [State if complications occurred — use “None” only if explicitly stated]
+            (Omit if not mentioned)
+
+            ## Conclusion / Summary
+            [Summarize the outcome of the procedure — e.g., successful cardioversion from AF to sinus rhythm]
+            (Only if present)
+
+            ## Recommendations
+            [Include any post-procedure care instructions, medications, or follow-up plans]
+            (Include only if available)
+
+            (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes or clinical note as a reference for the information include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes or clinical note, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)(Use as many full sentences as needed to capture all the relevant information from the transcript.)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+
+        elif template_type =="hospitalist_progress_note":
+            user_instructions = user_prompt
+
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
+
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
+
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Hospitalist Progress Note Template STructure:
+
+            # Hospitalist Progress Note 
+
+            ## Clinical Course:
+            Patient is a [insert age] with past medical history of [insert past medical history]. Patient presented to [insert hospital name] (if patient was transferred from another hospital, state that the patient was admitted following a transfer and the transfer hospital's name. Only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank) and admitted with the diagnosis of [insert admission diagnosis] with presenting chief complaint of [insert admission chief complaint]. Summarize the patient's clinical course since admission, including any significant events, changes in condition, or interventions. (Only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Today's Updates [Insert date of current consultation in US format]:
+            [Describe the patient's condition and any significant events or interventions in the last 24 hours in a narrative format.] (Only include if explicitly mentioned in the transcript, otherwise state "No significant events in the last 24 hours.")  
+            [Describe any new changes related to the significant events in a narrative format.] (Only include if explicitly mentioned in the transcript, otherwise leave blank.)  
+            [Relevant imaging results and their interpretation that were obtained in the last 24 hours in a narrative format.] (Only include if available in the transcript or contextual notes, otherwise omit.)  
+            [Relevant test results and their interpretation for the date of the note in a narrative format.] (Only include if available, otherwise omit.)
+
+            [Provide a summary of bedside questions responded to and education provided as mentioned in the transcript.] (Only include if explicitly mentioned in the transcript, otherwise leave blank.)
+
+            ## Review of Systems (ROS):
+            [List any relevant positive or negative findings from the review of systems.] (Only include if explicitly mentioned in the transcript, otherwise leave blank.)
+
+            ## Physical Exam:
+            [Describe the findings from the physical examination, including vital signs, general appearance, and specific system examinations.] (Only include if explicitly mentioned in the transcript, otherwise ignore:)  
+
+            ## Assessment and Plan:
+            [Patient's age, past medical history, and brief 1-3 sentence clinical course summary.]
+
+                1. [Medical issue 1 (condition name)]  
+                - Assessment: [Current assessment of the condition.]  
+                - Plan: [Proposed plan for management or follow-up.]  
+                - Counseling: [Description of the condition, natural history, or similar.] (Include only if discussed, otherwise omit.)
+
+                2. [Medical issue 2 (condition name)]  
+                - Assessment: [Current assessment of the condition.]  
+                - Plan: [Proposed plan for management or follow-up.]  
+                - Counseling: [Description of the condition, natural history, or similar.] (Include only if discussed, otherwise omit.)
+
+                3. [Medical issue 3, 4, 5, etc. (condition name)]  
+                - Assessment: [Current assessment of the condition.]  
+                - Plan: [Proposed plan for management or follow-up.]  
+                - Counseling: [Description of the condition, natural history, or similar.] (Include only if discussed, otherwise omit.)
+
+            Fluids, Electrolytes, Diet: [Insert current IV fluids (if explicitly mentioned), electrolytes requiring replacement (if explicitly mentioned), and current diet (if explicitly mentioned). Otherwise, omit.]  
+            DVT prophylaxis: [List the name of the ordered anticoagulant (e.g., Enoxaparin sodium, Heparin, Coumadin, Apixaban, Rivaroxaban) if explicitly mentioned, otherwise leave blank.]  
+            Central line: [Insert "Present" (with indication for use) or "Not applicable" based on the transcript, otherwise leave blank.]  
+            Foley catheter: [Insert "Present" (with indication for use) or "Not applicable" based on the transcript, otherwise leave blank.]  
+            Code Status: [Insert Code Status (e.g., "Full Code," "DNR," "DNR/DNI," "DNI," "Comfort Care") if explicitly mentioned, otherwise leave blank.]  
+            Disposition: [Insert the expected discharge date, pertinent medical issues affecting hospitalization, and discharge plans (rehabilitation, social services efforts) if explicitly mentioned, otherwise leave blank.]
+
+            (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes or clinical note as a reference for the information included in your note.)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+
+        elif template_type =="multiple_issues_visit":
+            user_instructions = user_prompt
+
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
+
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
+
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Multiple Issues Visit Report STructure:
+
+            # Multiple Issues Visit Report  
+
+            [(include only if patient agreed to electronic scribing during appointment) Consent obtained for Electronic Scribe use]
+
+            ## Summary for Follow up:
+            - [list each issue's differential diagnosis and treatment plan summarized into one line per issue]
+
+            [1. Issue, problem or request 1 (include issue, request or condition name and include ICD10 code)]
+            - [Current issues, reasons for visit, history of presenting complaints etc relevant to issue 1 (include only if applicable)]
+            - [Past medical history, previous surgeries, medications, relevant to issue 1 (include only if applicable)]
+            - [Objective findings, vitals, physical or mental state examination findings, including system specific examination(s) for issue 1 (include only if applicable)]
+            - [Likely diagnosis for Issue 1 (condition name  and include ICD10 code)]
+            - [Differential diagnosis for Issue 1 (include only if applicable)]
+            - [Investigations planned for Issue 1 (include only if applicable)]
+            - [Treatment planned for Issue 1 (include only if applicable)]
+            - [Relevant referrals for Issue 1 (include only if applicable)]
+
+            [2. Issue, problem or request 2 (include issue, request or condition name  and include ICD10 code)]
+            - [Current issues, reasons for visit, history of presenting complaints etc relevant to issue 2 (include only if applicable)]
+            - [Past medical history, previous surgeries, medications, relevant to issue 2 (include only if applicable)]
+            - [Objective findings, vitals, physical or mental state examination findings, including system specific examination(s) for issue 2 (include only if applicable)]
+            - [Likely diagnosis for Issue 2 (condition name  and include ICD10 code)]
+            - [Differential diagnosis for Issue 2 (include only if applicable)]
+            - [Investigations planned for Issue 2 (include only if applicable)]
+            - [Treatment planned for Issue 2 (include only if applicable)]
+            - [Relevant referrals for Issue 2 (include only if applicable)]
+
+            [3. Issue, problem or request 3, 4, 5 etc (include issue, request or condition name  and include ICD10 code)]
+            - [Current issues, reasons for visit, history of presenting complaints etc relevant to issue 3, 4, 5 etc (include only if applicable)]
+            - [Past medical history, previous surgeries, medications, relevant to issue 3, 4, 5 etc (include only if applicable)]
+            - [Objective findings, vitals, physical or mental state examination findings, including system specific examination(s) for issue 3, 4, 5 etc (include only if applicable)]
+            - [Likely diagnosis for Issue 3, 4, 5 etc (condition name  and include ICD10 code)]
+            - [Differential diagnosis for Issue 3, 4, 5 etc (include only if applicable)]
+            - [Investigations planned for Issue 3, 4, 5 etc (include only if applicable)]
+            - [Treatment planned for Issue 3, 4, 5 etc (include only if applicable)]
+            - [Relevant referrals for Issue 3, 4, 5 etc (include only if applicable)]
+
+            (Keep in mind that the transcript may be about a variety of topics, from medical conditions, to mental health and social concerns, to dietary and exercise discussions and you must always attempt to use the transcript to create an list of topics discussed using the template above. Use as many bullet points as necessary to ensure clinical information is adequately spaced for easy reading comprehension.)
+            (when reporting vital signs, report blood pressure as BP #/# and heart rate as PR #, this is the format recognized by my EMR)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+
+        elif template_type =="physio_soap_outpatient":
+            user_instructions = user_prompt
+
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
+
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
+
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Physio SOAP outpatient Report STructure:
+
+            # Physio SOAP outpatient  
+
+            (You are a highly skilled physiotherapist with a goal helping your patients improve their pain and function. You are empathetic and want your patient's to achieve their goals)
+
+            ## Current Condition/Complaint:
+            [Summarise progress of presenting complaint/injury/issue since previous physiotherapy appointment] (Only include if explicitly mentioned)
+            [Summarise any new symptoms or complaints the patient may present with] (Only include if explicitly mentioned)
+            [Summarise patient's adherence to the plan since previous  physiotherapy appointment, for example, only completed home exercises once, etc] (Only include if explicitly mentioned)
+            [Summarise patient's medication usage for the presenting complaint/injury/issue] (Only include if explicitly mentioned)
+            [State any radiology assessment and their findings that have been undertaken for this patient's presenting complaint/injury since last physiotherapy appointment] (Only include if explicitly mentioned)
+
+            ## Objective:
+            [List all physical observations and examinations completed, along with their findings] (Always group relatable findings together, for example, active range of motion measures must be situated in the one section) 
+
+            ## Treatment:
+            [List all educational treatment that was provided throughout session, e.g. pain science education] (Only include if explicitly mentioned)
+            [List all hands on treatment provided  throughout session, for example, Mobilisation: Gr II PA R) C5/6 2x30secs, Unilateral soft tissue massage upper L) calf, etc] (Only include if explicitly mentioned)
+            [List all active therapy treatment provided throughout the session, for example, 3x10 Single leg calf raises, 3x10 L) ankle knee to walls, etc] (Only include if explicitly mentioned)
+            [List home exercise program [HEP] provided] (Include reps, sets and frequency) (Only include if explicitly mentioned)
+
+            ## Assessment:
+            [Summarise the assessment and state diagnosis based on subjective and objective findings] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank) 
+            [Summarise overall progress of patient's issue since presenting to physiotherapy] (Only include if explicitly mentioned)
+            [Summarise their progress towards their stated goals] (Only include if explicitly mentioned)
+            [State any barriers affecting progress] (Only include if explicitly mentioned)
+
+            ## Plan:
+            [Brief summary of the clinical plan until the next appointment] (Only include if explicitly mentioned) 
+            [Timeline of next review, e.g, r/v 2/52] (Only include if explicitly mentioned)
+            [Likely therapy I will provide at our next appointment] (Only include if explicitly mentioned)
+            [Referrals to other professionals that need to occur or the patient will attend] (Only include if explicitly mentioned)
+            [Letters, phone calls or communication the treating therapist will do before next session (Only include if explicitly mentioned)
+
+            (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes, or clinical note as a reference for the information included in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes, or clinical note, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank. Use as many bullet points as needed to capture all the relevant information from the transcript.)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+
+        elif template_type =="counseling_consultation":
+            user_instructions = user_prompt
+
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
+
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
+
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Counseling Consultation Report Structure:
+
+            # Counseling Consultation Report 
+
+            ## Current Presentation:
+            [List key presenting issues or concerns]
+            [Describe severity and impact of issues]
+
+            ## Session Content:
+            [Provide detailed summary of topics discussed during the session]
+            [Include patient's thoughts, feelings, and insights shared]
+            [Note any significant realizations or breakthroughs]
+
+            ## Obstacles, Setbacks and Progress:
+            [List main obstacles or challenges faced by the patient]
+            [Describe any setbacks experienced since last session]
+            [Highlight areas of progress or improvement]
+
+            ## Session Summary:
+            [Provide a comprehensive overview of the session]
+            [Summarize key themes, insights, and developments]
+            [Include therapist's observations and interpretations]
+
+            ## Next Steps:
+            [List any planned actions or goals for the patient]
+            [Include date and time of next scheduled session]
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+
+        elif template_type =="gp_consult_note":
+            user_instructions = user_prompt
+
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
+
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
+
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            GP Consult Note Template STructure:
+
+            # GP Consult Note
+
+            (Write entire note with US English)
+            (Don't include comments including "not mentioned")
+            (Don't put any words in brackets)
+            (Do not include any comment about MyMedicare registration)
+            (Do not include any comment about My Health Record)
+            (Do not start any sentence in the note with the words "The patient")
+            (Do not include e-mail addresses and phone numbers)
+            (Use Australian spelling of medications)
+            (Do not start any sentence with the word "clinician" or "GP")
+            (Do not write anything about patient details at the start of the text)
+            (Include negative findings in medical history and examination)
+            (Do not include profanity if used during the consult)
+            (Remove "-" at the beginning of sentences)
+            (Do not have a bullet point without a sentence after it)
+            (Remove "Patient Details:" at the top of the note)
+            (Do not start the note with "C/O")
+            (Do not include a comment saying "nil of note" if heading not mentioned)
+            (Do not include a comment saying "Not performed during this consultation")
+            (Do not include the sentence saying "Examination:"Not performed during this consultation")
+            (Never come up with your own patient details, assessment, diagnosis, differential diagnosis, plan, interventions, evaluation, plan for continuing care, safety netting advice, etc - use only the transcript, contextual notes or clinical note as a reference for the information you include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript or contextual notes, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)(Use as many sentences as needed to capture all the relevant information from the transcript and contextual notes.)
+
+            Verbally consented to the use of AI for note-taking as per Avant.
+            Offered discussion as to pros and cons and risks of data breach and explanation of how it works.
+
+            ## History:
+            1. [Detailed description for symptom 1]
+            [Symptom quality and severity]
+            [Symptom duration]
+            [Recent illnesses or events]
+            [Associated symptoms]
+            [Current treatments and their effects]
+            [Treatment planned for Issue 1 (only if applicable)]
+
+            2. [Detailed description for symptom 2]
+            [Symptom quality and severity]
+            [Symptom duration]
+            [Recent illnesses or events]
+            [Associated symptoms]
+            [Current treatments and their effects]
+            [Treatment planned for Issue 2 (only if applicable)]
+
+            3. [Detailed description for symptom 3]
+            [Symptom quality and severity]
+            [Symptom duration]
+            [Recent illnesses or events]
+            [Associated symptoms]
+            [Current treatments and their effects]
+            [Treatment planned for Issue 3 (only if applicable)]
+
+            4. [Detailed description for symptom 4]
+            [Symptom quality and severity]
+            [Symptom duration]
+            [Recent illnesses or events]
+            [Associated symptoms]
+            [Current treatments and their effects]
+            [Treatment planned for Issue 4 (only if applicable)]
+
+            5. [Detailed description for symptom 5]
+            [Symptom quality and severity]
+            [Symptom duration]
+            [Recent illnesses or events]
+            [Associated symptoms]
+            [Current treatments and their effects]
+            [Treatment planned for Issue 5 (only if applicable)]
+
+            ## Past history: (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            [Relevant past medical conditions, surgeries, hospitalisations, medications and ongoing treatments] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            [Possible medication side effects if explicitly mentioned]
+
+            ## Family history: (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            [Relevant past family history and social history] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            ## Examination: (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            (Do not include a comment saying "Not performed during this consultation")
+            [Findings from the physical examination, including vital signs and any abnormalities]
+            [Negative findings mentioned on examination]
+            [Only put examination findings in once] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - [Vital signs listed, eg. T , Sats %, HR , BP , RR , (as applicable)]
+            - [Physical or mental state examination findings, including system specific examination] (only include if applicable, and use as many bullet points as needed to capture the examination findings)
+
+            ## Plan:
+            [Summarise treatment plan for all problems detailed above]
+
+            (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes or clinical note as a reference for the information include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes or clinical note, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)(Use as many full sentences as needed to capture all the relevant information from the transcript.)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+
+        elif template_type =="detailed_dietician_initial_assessment:":
+            user_instructions = user_prompt
+
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
+
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
+
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Detailed Dietician Initial Assessment Report Template Structure:
+
+            # Detailed Dietician Initial Assessment Report 
+
+            ## Weight History
+                •	Dieting History:
+                [Details about past diets or weight-loss efforts.]
+                •	Weight Cycling:
+                [Information on any fluctuations in weight over time.]
+                •	Pre-morbid Weight:
+                [Client’s usual or stable weight before any significant changes.]
+            
+            ## Body Image
+                •	Body Checking Behaviors:
+                [Describe any behaviors related to checking appearance or body size.]
+                •	Body Avoiding Activities:
+                [Activities the client avoids due to body image concerns.]
+            
+            ## Disordered Eating/Eating Disorder Behavior
+                •	Restricting Intake:
+                [Frequency, duration, context of restricting food intake.]
+                •	Binge Eating:
+                [Frequency, duration, context of binge eating episodes.]
+                •	Overeating:
+                [Details on any instances of overeating.]
+                •	Self-induced Vomiting:
+                [Frequency, duration, context of vomiting to control weight.]
+                •	Exercise:
+                [Details on exercise patterns, including any compulsive exercise.]
+                •	Rumination:
+                [Instances of food regurgitation or rumination.]
+                •	Chewing and Spitting:
+                [Frequency and context of chewing food and spitting it out.]
+                •	Laxative/Diuretic Use:
+                [Details on any use of laxatives or diuretics.]
+                •	Diet Pills:
+                [Information on any diet pill usage.]
+                •	Night Eating:
+                [Details on eating behaviors during the night.]
+                
+            ## Eating Behavior
+                •	Hunger/Fullness Cues:
+                [Client’s ability to recognize and respond to hunger/fullness.]
+                •	Food Rules/Fear Foods:
+                [Any specific food rules or foods the client fears.]
+                •	Allergies/Intolerances:
+                [Known food allergies or intolerances.]
+                •	Vegan/Vegetarian:
+                [Details on any vegan or vegetarian diet followed.]
+                
+            ## Nutrition Intake
+                •	Wakes Up:
+                [Usual wake-up time and any eating habits upon waking.]
+                •	Breakfast:
+                [Details on breakfast routine.]
+                •	Snack:
+                [Details on morning snack, if applicable.]
+                •	Lunch:
+                [Details on lunch routine.]
+                •	Snack:
+                [Details on afternoon snack, if applicable.]
+                •	Dinner:
+                [Details on dinner routine.]
+                •	Snack:
+                [Details on evening snack, if applicable.]
+                •	Meals per Day:
+                [Total number of meals and snacks per day.]
+                •	Fluid Intake:
+                [Details on daily fluid consumption.]
+            
+            ## Physical Activity Behavior
+                •	Current Activity:
+                [Type and frequency of physical activity.]
+                •	Relationship with Physical Activity:
+                [Client’s feelings and relationship with physical activity.]
+            
+            ## Medical & Psychiatric History
+                [Details on any relevant medical and psychiatric history.]
+            
+            ## Menstrual History
+                •	Age of Menses:
+                [Age at onset of menstruation.]
+                •	Dates of Last Period:
+                [Most recent menstrual period dates.]
+                •	Usual Cycle Length:
+                [Typical length of menstrual cycle, e.g., 28 days.]
+                •	Regularity of Cycle:
+                [Description of cycle regularity, e.g., regular, irregular.]
+                •	Symptoms:
+                [Any symptoms related to menstruation.]
+                •	Use of Contraception:
+                [Type of contraception used, e.g., OCP, IUD.]
+            
+            ## Gut/Bowel Health
+                [Details on bowel habits and gut health.]
+            
+            ## Pathology/Scans
+                •	ECG/BMD:
+                [Details on any relevant pathology or scans.]
+            
+            ## Medications/Supplements
+               [List any medications or supplements the client is currently taking.]
+            
+            ## Social History/Lifestyle
+                •	Living Status:
+                [Details on living arrangements.]
+                •	Occupation:
+                [Client’s occupation.]
+                •	Alcohol Intake:
+                [Details on alcohol consumption.]
+                •	Smoking Status:
+                [Smoking habits, if applicable.]
+                •	Stress:
+                [Stress levels and sources of stress.]
+                •	Sleep:
+                [Details on sleep patterns and quality.]
+                •	Relaxation/Self-care Activities:
+                [Activities the client engages in for relaxation and self-care.]
+                •	Other Allied Health Professionals:
+                [List of other healthcare providers involved in the client’s care.]
+
+            (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes, or clinical note as a reference for the information included in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes, or clinical note, you must not state that it has not been mentioned and instead leave the relevant placeholder blank.)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+
         elif template_type == "referral_letter":
 
             user_instructions= f"""You are provided with a medical conversation transcript. 
@@ -2835,314 +4091,373 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             """
        
         elif template_type == "psychology_session_notes":
-            system_message = f"""You are a clinical psychologist documentation expert specializing in professional session notes.
-        {preservation_instructions}
-        {grammar_instructions}
+            user_instructions = user_prompt
 
-        CRITICAL STYLE INSTRUCTIONS:
-        1. Write as a clinical psychologist would write - using professional terminology and appropriate clinical language
-        2. Be CONCISE and DIRECT in your documentation
-        3. Use "Client" instead of "Patient" throughout the document
-        4. Use BULLET POINTS for detailed information in each section
-        5. Only include information explicitly mentioned in the transcript
-        6. Always preserve all dates, therapeutic techniques, and clinical observations EXACTLY as stated
-        7. When information for a section is not available, DO NOT include placeholder text - simply leave that section blank
-        8. Do not invent or hallucinate any information not present in the conversation
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
 
-        Format your response as a valid textual format according to this schema:
-        {{
-        "session_tasks_review": {{
-            "practice_skills": ["Array of details about client's practice of skills/strategies from last session"],
-            "task_effectiveness": ["Array of details about completion and effectiveness of tasks"],
-            "challenges": ["Array of challenges faced by client in completing tasks"]
-        }},
-        "current_presentation": {{
-            "current_symptoms": ["Array of client's current presentation, symptoms and new issues"],
-            "changes": ["Array of changes in symptoms or behaviors since last session"]
-        }},
-        "session_content": {{
-            "issues_raised": ["Array of issues raised by client"],
-            "discussions": ["Array of details of relevant discussions during session"],
-            "therapy_goals": ["Array of therapy goals/objectives discussed"],
-            "progress": ["Array of progress achieved towards therapy goals"],
-            "main_topics": ["Array of main topics, insights and client's responses"]
-        }},
-        "intervention": {{
-            "techniques": ["Array of specific therapeutic techniques and interventions used"],
-            "strategies": ["Array of specific techniques or strategies and client engagement"]
-        }},
-        "treatment_progress": {{
-            "setbacks": ["Array of setbacks, barriers or obstacles for each therapy goal"],
-            "satisfaction": ["Array of client's comments on treatment satisfaction"]
-        }},
-        "risk_assessment": {{
-            "suicidal_ideation": "String detailing any history of suicidal ideation, attempts, plans",
-            "homicidal_ideation": "String describing any homicidal ideation",
-            "self_harm": "String detailing any history of self-harm",
-            "violence": "String describing any incidents of violence or aggression",
-            "management_plan": ["Array of strategies to manage risks if applicable"]
-        }},
-        "mental_status": {{
-            "appearance": "String describing client's clothing, hygiene, physical characteristics",
-            "behaviour": "String describing client's activity level and interactions",
-            "speech": "String noting rate, volume, tone, clarity of speech",
-            "mood": "String recording client's self-described emotional state",
-            "affect": "String describing range and appropriateness of emotional response",
-            "thoughts": "String assessing thought process and content",
-            "perceptions": "String noting any reported hallucinations or sensory misinterpretations",
-            "cognition": "String describing memory, orientation, concentration",
-            "insight": "String describing client's understanding of their condition",
-            "judgment": "String describing decision-making ability"
-        }},
-        "out_of_session_tasks": ["Array of tasks assigned before next session and reasons"],
-        "next_session": {{
-            "date": "String mentioning date and time of next session",
-            "plan": ["Array of topics to address and planned interventions"]
-        }}
-    }}
-    IMPORTANT: 
-    - Your response MUST be a valid Text format exactly matching this schema
-    - Only include information explicitly mentioned in the transcript
-    - If information for a field is not mentioned, provide an empty array or empty string
-    - Do not invent information not present in the conversation
-    - Be DIRECT and CONCISE in all documentation while preserving clinical accuracy
-    - Use "Client" instead of "Patient" throughout
-    - Use professional clinical psychology terminology
-    """
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
 
-        elif template_type == "pathology_note":
-            system_message = f"""You are a medical documentation expert specializing in professional pathology and therapy notes.
-        {preservation_instructions}
-        {grammar_instructions}
-        CRITICAL STYLE INSTRUCTIONS:
-        1. Write as a medical professional would write - using professional medical terminology and standard medical abbreviations
-        2. Be CONCISE and DIRECT in your documentation
-        3. Focus on capturing critical clinical details using precise medical language
-        4. Never miss dates, medication dosages, or measurements - preserve them EXACTLY as stated
-        5. Format the note exactly according to the structure provided
-        6. Only include information explicitly mentioned in the transcript
-        7. When information is not present in the transcript, do not include placeholder text - simply leave that section blank
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
 
-        Format your response as a valid textual format according to this schema:
-        {{
-        "therapy_attendance": {{
-            "current_issues": "String describing current issues, reasons for visit, discussion topics, presenting complaints",
-            "past_medical_history": "String describing past medical history, previous surgeries",
-            "medications": "String listing medications and herbal supplements WITH EXACT dosages",
-            "social_history": "String describing social history",
-            "allergies": "String listing allergies"
-        }},
-        "objective": {{
-            "examination_findings": "String describing objective findings from examination",
-            "diagnostic_tests": "String mentioning relevant diagnostic tests and results"
-        }},
-        "reports": "String summarizing relevant reports and findings",
-        "therapy": {{
-            "current_therapy": "String describing current therapy or interventions",
-            "therapy_changes": "String mentioning any changes to therapy or interventions"
-        }},
-        "outcome": "String describing the outcome of the therapy or interventions",
-        "plan": {{
-            "future_plan": "String outlining the plan for future therapy or interventions",
-            "followup": "String mentioning any follow-up appointments or referrals"
-        }}
-        }}
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
 
-        IMPORTANT: 
-        - Your response MUST be a valid TEXTUAL format exactly matching this schema
-        - Use "Not documented" for any field without information in the conversation
-        - Do not invent information not present in the conversation
-        - Be DIRECT and CONCISE in all documentation while preserving clinical accuracy
-        - Always preserve ALL dates, medication dosages, and measurements EXACTLY as stated
-        - Create complete documentation that would meet professional medical standards
-        """
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Psychology Session Notes Template STructure:
+
+            # Psychology Session Notes
+
+            (The template or structure below is intended to be used for a follow up session or progress note by clinical psychologists. It is important that you note that the details of the topics discussed in the transcript may vary greatly between patients, as a large proportion of the information intended for placeholders in square brackets in the template or structure below may already be known and well established in the context of the relationship between the clinicial psyc hologist and the patient. If there is no specific mention in the transcript or contextual notes of the relevant information for a placeholder below, you should not include the placeholder in the clinical note or document that you output - instead you should leave it blank. Do not hallucinate or make up any information for a placeholder in the template or structure below if it is not mentioned or present in the transcript. The topics discussed in the transcript by clinical psychologists are sometimes not well-defined clinical disease states or symptoms and are often just aspects of the patient's life that are important to them and they wish to discuss with their clinician. Therefore it is vital that the entire transcript is used and included in the clinical note or document that you output, as even brief topic discussions may be an important part of the patient's mental health care. The placeholders below should therefore be used as a guide to how the information in the transcript should be captured in the clinical note or document, but you should interpret the topics discussed and then use your judgement to either: exclude sections from the template or structure below because it is not relevant to the clinical note or document based on the details of the topics discussed in the transcript, or include new sections that are not currently present in the template or structure, in order to accurately capture the details of the topics discussed in the transcript. Remember to use as many bullet points as you need to capture the relevant details from the transcript for each section. Use the word Client instead of Patient. Do not respond to these guidelines in your output; you must only output the clinical note or document as instructed.)
+
+            ## OUT OF SESSION TASK REVIEW:
+            - [Detail the patient's practice of skills, strategies or reflection from the last session]. (use as many bullet points as needed to capture all the details of the patient’s practice of skills, strategies, reflections on the last session and any issues; only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - [Detail the patient's report on the completion and effectiveness of these tasks]. (use as many bullet points as needed to capture all the details of the patient’s practice of skills, strategies, reflections on the last session and any issues; only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - [Detail any challenges or obstacles faced by the patient in completing these tasks?]. (use as many bullet points as needed to capture all the details of the patient’s practice of skills, strategies, reflections on the last session and any issues; only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            ## CURRENT PRESENTATION:
+            - [Detail the patient’s current presentation, including symptoms and any new arising issues]. (use as many bullet points as needed to capture all the details of the patient’s symptoms and issues; only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - [Detail any changes in symptoms or behaviors since the last session]. (use as many bullet points as needed to capture all the details of the patient’s symptoms and issues; only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            ## SESSION CONTENT:
+            - [Describe any issues raised by the patient.]. (use as many bullet points as needed to capture all the details discussed; only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - [Describe details of relevant discussions with patient during the session.]. (use as many bullet points as needed to capture all the details discussed; only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - [Describe the therapy goals/objectives discussed with patient.]. (use as many bullet points as needed to capture all the details discussed; only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - [Describe the progress achieved by patient towards each therapy goal/objective.]. (use as many bullet points as needed to capture all the details discussed; only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - [Detail the main topics discussed during the session, any insights or realisations by the patient, and the patient's response to the discussion]. (use as many bullet points as needed to capture all the details discussed; only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            ## INTERVENTION:
+            - [Detail the specific therapeutic techniques and interventions used or to be used, for example, CBT, Mindfulness Based CBT, ACT, DBT, Schema Therapy, or EMDR.] (use as many bullet points as needed to capture all the details discussed. ) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            [Destail the specific techniques or strategies used and the patient's engagement with the interventions.]. (use as many bullet points as needed to capture all the details discussed. ) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            ## SETBACKS/ BARRIERS/ PROGRESS WITH TREATMENT
+            - [Describe  the setbacks, barriers, obstacles, or progress for each therapy goal/objective]. (use as many bullet points as needed to capture all the details discussed; only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - [Detail the client’s comments on their satisfaction with treatment]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank).]
+
+            ## RISK ASSESSMENT AND MANAGEMENT:
+            - Suicidal Ideation: [describe any history of suicidal ideation, attempts, plans in detail]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Homicidal Ideation: [Describe any homicidal ideation]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Self-harm: [Detail any history of self-harm]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - Violence & Aggression: [Describe any recent or past incidents of violence or aggression]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            ## Management Plan: [Describe strategy or steps taken to manage suicidal ideation / homicidal ideation / self-harm / violence & aggression (if applicable)]. (use as many bullet points as needed to capture all the details discussed) (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            ## MENTAL STATUS EXAMINATION:
+            Appearance: [Describe the patient's clothing, hygiene, and any notable physical characteristics]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            Behaviour: [Observe the patient's activity level, interaction with their surroundings, and any unique or notable behaviors].  (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            Speech: [Note the rate, volume, tone, clarity, and coherence of the patient's speech]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            Mood: [Record the patient's self-described emotional state]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank).
+            Affect: [Describe the range and appropriateness of the patient's emotional response during the examination, noting any discrepancies with the stated mood]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            Thoughts: [Assess the patient's thought process and thought content, noting any distortions, delusions, or preoccupations]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            Perceptions: [Note any reported hallucinations or sensory misinterpretations, specifying type and impact on the patient]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank).
+            Cognition: [Describe the patient's memory, orientation to time/place/person, concentration, and comprehension]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank).
+            Insight: [Describe the patient's understanding of their own condition and symptoms, noting any lack of awareness or denial]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank).
+            Judgment: [Describe the patient's decision-making ability and understanding of the consequences of their actions]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank).
+
+            ## OUT OF SESSION TASKS
+            - [Detail any tasks or activities assigned to the patient to complete before the next session and the reasons for the tasks]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            ## PLAN FOR NEXT SESSION
+            - Next Session: [mention date and time of next session]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+            - [Detail the specific topics or issues to be addressed at the next session, any planned interventions or techniques to be used]. (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank)
+
+            (Ensure all information discussed in the transcript is included under the relevant heading or sub-heading above, otherwise include it as a bullet-pointed additional note at the end of the note.)
+            (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes or clinical note as a reference for the information to include in your note. Ensure the output is superdetailed and do not use quotes. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes or clinical note, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.) (Use the word Client instead of Patient) 
+                        
+            Begin generating the report using the transcript content and template structure provided.
+            """
+    
+        elif template_type == "speech_pathology_note":
+            user_instructions = user_prompt
+
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
+
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
+
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Speech Pathology Report Template STructure:
+
+            # Speech Pathology Report 
+
+            ## Therapy session attended to 
+            - [describe current issues, reasons for visit, discussion topics, history of presenting complaints etc] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [describe past medical history, previous surgeries] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [mention medications and herbal supplements] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [describe social history] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [mention allergies] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Objective:
+            - [describe objective findings from examination] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [mention any relevant diagnostic tests and results] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Reports:
+            - [summarize relevant reports and findings] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Therapy:
+            - [describe current therapy or interventions] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [mention any changes to therapy or interventions] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Outcome:
+            - [describe the outcome of the therapy or interventions] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Plan:
+            - [outline the plan for future therapy or interventions] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - [mention any follow-up appointments or referrals] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave
+                    
+            (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes or clinical note as a reference for the information include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes or clinical note, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)(Use as many full sentences as needed to capture all the relevant information from the transcript.)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
         
         elif template_type == "progress_note":
-            system_message = f"""You are a medical documentation expert specializing in creating detailed and professional progress notes.
-        {preservation_instructions}
-        {grammar_instructions}
-        {date_instructions}
+            user_instructions = user_prompt
 
-        Below is the format you need to follow for report
-        {formatting_instructions}
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
 
-        CRITICAL STYLE INSTRUCTIONS:
-        1. Write as a doctor would write • using professional medical terminology
-        2. Format MOST sections as FULL PARAGRAPHS with complete sentences (not bullet points)
-        3. Only the Plan and Recommendations section should use numbered bullet points
-        4. Preserve all clinical details, dates, medication names, and dosages exactly as stated
-        5. Be concise yet comprehensive, capturing all relevant clinical information
-        6. Use formal medical writing style throughout
-        7. Never mention when information is missing • simply leave that section brief or empty
-        8. When information is not present in the transcript, DO NOT include placeholder text
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
 
-        Format your response as a valid TEXT/Plain according to this format:
-        [Clinic Letterhead]
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
 
-        [Clinic Address Line 1]
-        [Clinic Address Line 2]
-        [Contact Number]
-        [Fax Number]
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
 
-        Practitioner: [Practitioner's Full Name and Title]
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Progress Note Template Structure:
 
-        Surname: [Patient's Last Name]
-        First Name: [Patient's First Name]
-        Date of Birth: [Patient's Date of Birth] (use format: DD/MM/YYYY)
+            # Progress Note
 
-        PROGRESS NOTE
+            [Clinic Letterhead]
 
-        [Date of Note] (use format: DD Month YYYY)
+            [Clinic Address Line 1]
+            [Clinic Address Line 2]
+            [Contact Number]
+            [Fax Number]
 
-        [Introduction] (Begin with a brief description of the patient, including their age, marital status, and living situation. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+            Practitioner: [Practitioner's Full Name and Title]
 
-        [Patient’s History and Current Status] (Describe the patient’s relevant medical history, particularly focusing on any chronic conditions or mental health diagnoses. Mention any treatments that have helped stabilize the condition, such as medication or psychotherapy. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+            Surname: [Patient's Last Name]
+            First Name: [Patient's First Name]
+            Date of Birth: [Patient's Date of Birth] (use format: DD/MM/YYYY)
 
-        [Presentation in Clinic] (Provide a description of the patient's physical appearance during the clinic visit. Include anyone who they attented the clinic with. Include observations about their appearance, demeanor, and cooperation. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+            ## PROGRESS NOTE
 
-        [Mood and Mental State] (Describe the patient's mood and mental state as reported during the visit. Include details about their general mood stability, any thoughts of worthlessness, hopelessness, or harm, and their feelings of safety and security. Also mention if the patient denied or reported any paranoia or hallucinations. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+            [Date of Note] (use format: DD Month YYYY)
 
-        [Social and Functional Status] (Discuss the patient's social relationships and their level of function in daily activities. Include information about their relationship with significant others, their participation in programs like NDIS, and their ability to manage household duties. If the patient receives help from others, such as a spouse, describe this support. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+            [Introduction] (Begin with a brief description of the patient, including their age, marital status, and living situation. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
 
-        [Physical Health Issues] (Mention any physical health issues the patient is experiencing, such as obesity or arthritis. Include advice given to the patient about managing these conditions, and whether they are under the care of a general practitioner or specialist for these issues. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+            [Patient’s History and Current Status] (Describe the patient’s relevant medical history, particularly focusing on any chronic conditions or mental health diagnoses. Mention any treatments that have helped stabilize the condition, such as medication or psychotherapy. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
 
-        [Plan and Recommendations] (Outline the agreed-upon treatment plan based on the discussion with the patient and any accompanying individuals. Include recommendations to continue with current medications, ongoing programs like NDIS, and any other health advice provided, such as maintaining adequate water intake. Also include a plan for follow-up visits to monitor the patient’s mental health stability. You may list this part in numbered bullet points)
+            [Presentation in Clinic] (Provide a description of the patient's physical appearance during the clinic visit. Include anyone who they attented the clinic with. Include observations about their appearance, demeanor, and cooperation. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
 
-        [Closing Statement] (Include any final advice or recommendations given to the patient. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+            [Mood and Mental State] (Describe the patient's mood and mental state as reported during the visit. Include details about their general mood stability, any thoughts of worthlessness, hopelessness, or harm, and their feelings of safety and security. Also mention if the patient denied or reported any paranoia or hallucinations. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
 
-        [Practitioner's Full Name and Title]
-        Consultant Psychiatrist
+            [Social and Functional Status] (Discuss the patient's social relationships and their level of function in daily activities. Include information about their relationship with significant others, their participation in programs like NDIS, and their ability to manage household duties. If the patient receives help from others, such as a spouse, describe this support. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
 
-        (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care • use only the transcript, contextual notes, or clinical note as a reference for the information to include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes, or clinical note, you must not state that the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)(Ensure that every section is written in full sentences and paragraphs, capturing all relevant details in a narrative style.)
+            [Physical Health Issues] (Mention any physical health issues the patient is experiencing, such as obesity or arthritis. Include advice given to the patient about managing these conditions, and whether they are under the care of a general practitioner or specialist for these issues. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
 
-        IMPORTANT: 
-        - Your response MUST be a valid Text/plain format exactly matching this template
-        - Only include information explicitly mentioned in the transcript
-        - If information for a field is not mentioned, provide an empty string 
-        - Write most sections as FULL PARAGRAPHS with complete sentences
-        - Only the "plan" section should be formatted as an array of bullet points
-        - Do not invent information not present in the conversation
-        - Use professional medical terminology and maintain formal tone
-        """
-        
+            [## Plan and Recommendations:] (Outline the agreed-upon treatment plan based on the discussion with the patient and any accompanying individuals. Include recommendations to continue with current medications, ongoing programs like NDIS, and any other health advice provided, such as maintaining adequate water intake. Also include a plan for follow-up visits to monitor the patient’s mental health stability. You may list this part in numbered bullet points)
+
+            [Closing Statement] (Include any final advice or recommendations given to the patient. This section must be written in full sentences as a cohesive paragraph. Do not use bullet points or lists.)
+
+            [Practitioner's Full Name and Title]
+            Consultant Psychiatrist
+
+            (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes, or clinical note as a reference for the information to include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes, or clinical note, you must not state that the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)(Ensure that every section is written in full sentences and paragraphs, capturing all relevant details in a narrative style.)
+
+
+            (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes or clinical note as a reference for the information include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes or clinical note, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)(Use as many full sentences as needed to capture all the relevant information from the transcript.)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+    
         elif template_type == "meeting_minutes":
-            system_message = f"""You are a professional medical scribe specialized in creating concise and accurate meeting minutes from transcribed conversations.
-        {preservation_instructions}
-        {grammar_instructions}
+            user_instructions = user_prompt
 
-        CRITICAL STYLE INSTRUCTIONS:
-        1. Only include information explicitly mentioned in the transcript. Do not invent or assume details.
-        2. Use professional language appropriate for medical settings.
-        3. Be concise and clear in your documentation.
-        4. Format information in bullet points where appropriate.
-        5. If information for a specific section is not present in the transcript, indicate it as "Not documented" or similar appropriate phrasing.
-        6. For date and time of the meeting, if not explicitly mentioned, use the current date and time.
-        7. Ensure all action items clearly state both the action and the responsible party when available.
-        8. Maintain a formal tone throughout the document.
-        9. Focus only on information relevant to the meeting - do not include extraneous details.
-        10. Ensure grammar and punctuation are perfect throughout.
-        11. NEVER refer to participants as "Speaker 0" or "Speaker 1" - instead, use their roles, titles, or names if mentioned, or simply present the information without attributing to specific speakers.
-        12. Write discussion points, decisions, and action items in a neutral, professional tone without speaker attribution.
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
 
-        Format your response as a valid TEXT/PLAIN format according to this schema:
-        {{
-        "date": "Meeting date if mentioned, otherwise empty string",
-        "time": "Meeting time if mentioned, otherwise empty string",
-        "location": "Meeting location if mentioned, otherwise empty string",
-        "attendees": ["Array of attendees with proper names and titles if mentioned - NEVER use Speaker X labels"],
-        "agenda_items": ["Array of agenda items if mentioned"],
-        "discussion_points": ["Array of detailed discussion points WITHOUT speaker attribution (e.g., 'Patient reported feeling...' not 'Speaker 1 reported feeling...')"],
-        "decisions_made": ["Array of decisions made during the meeting WITHOUT speaker attribution"],
-        "action_items": ["Array of action items with responsible parties WITHOUT speaker attribution"],
-        "next_meeting": {{
-            "date": "Date of next meeting if mentioned",
-            "time": "Time of next meeting if mentioned",
-            "location": "Location of next meeting if mentioned"
-        }}
-        }}
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
 
-        IMPORTANT: 
-        - Your response MUST be a valid TEXT/PLAIN format exactly matching this schema
-        - Only include information explicitly mentioned in the transcript
-        - If information for a field is not mentioned, provide an empty string or empty array
-        - Do not invent information not present in the conversation
-        - NEVER use 'Speaker 0' or 'Speaker 1' labels - use professional clinical language instead
-        - For discussion points about patients, use terms like "Patient reported..." or "It was noted that the patient..."
-        - For decisions or actions by medical professionals, use terms like "Decision to start medication..." or "Clinician recommended..."
-        - Be DIRECT and CONCISE in all documentation while preserving accuracy
-        - Use professional terminology appropriate for medical settings
-        """
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
+
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
+
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Meeting Minutes Template Structure:
+
+            # Meeting Minutes
+
+            Date: [date of meeting] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise user current date.)
+            Time: [time of meeting] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            Location: [location of meeting] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Attendees: 
+            - [list of attendees] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Agenda Items:
+            - [list of agenda items] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Discussion Points:
+            - [detailed discussion points] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Decisions Made:
+            - [decisions made during the meeting] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Action Items:
+            - [list of action items and responsible parties] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            ## Next Meeting:
+            - Date: [date of next meeting] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - Time: [time of next meeting] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+            - Location: [location of next meeting] (only include if explicitly mentioned in the transcript, contextual notes or clinical note, otherwise leave blank.)
+
+            (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes or clinical note as a reference for the information include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes or clinical note, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)(Use as many full sentences as needed to capture all the relevant information from the transcript.)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
     
         elif template_type == "followup_note":
-            system_message = f"""You are a clinical documentation specialist focused on creating concise, accurate follow-up notes for mental health practitioners.
-        {preservation_instructions}
-        {grammar_instructions}
-        Below is the format you need to follow for report
-        {formatting_instructions}
-        
+            user_instructions = user_prompt
 
-        CRITICAL STYLE INSTRUCTIONS:
-        1. Create a concise, well-structured follow-up note using bullet points
-        2. Use professional medical terminology appropriate for clinical documentation
-        3. Be direct and specific when describing symptoms, observations, and plans
-        4. Document only information explicitly mentioned in the transcript
-        5. Format each section with clear bullet points
-        6. If information for a section is not available, ignore that section
-        7. Use objective, clinical language throughout
+            system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
+            Your output must reflect a professional, concise, and doctor-like tone. Avoid verbose, repetitive, or casual language. The goal is to produce a report that enhances clinical efficiency and clarity.
+            Only include information that is **explicitly mentioned** in the transcript, contextual notes, or clinical notes. Do **not** infer or fabricate any details regarding the patient’s history, assessment, plan, medications, or investigations.
 
-        Format your response as a valid TEXT/PLAIN format according to this schema:
-        
-        # FOllow Up Note
-       
-         [Date] # use current day date here if not mentioned
+            Omission Policy:
+            - If data for any section or placeholder is not available, **omit the entire section and its heading**.
+            - Do **not** insert default text like "None known" unless explicitly instructed by the template or transcript.
 
-        ## History of Presenting Complaints:
-        • [Symptom 1 description]
-        • [Symptom 2 description]
-        • [Medication adherence]
-        • [Concentration level]
+            Content Requirements:
+            - Use clear, precise, and formal medical language suitable for clinical documentation.
+            - Structure each section according to the template, using professional formatting.
+            - Convert all numeric references to proper numerical format (e.g., "five days" → "5 days").
 
-        ## Mental Status Examination:
-        • Appearance: [General appearance]
-        • Behavior: [Behavioral observations]
-        • Speech: [Speech characteristics]
-        • Mood: [Reported mood]
-        • Affect: [Observed affect]
-        • Thoughts: [Thought content]
-        • Perceptions: [Perceptual disturbances]
-        • Cognition: [Cognitive functioning]
-        • Insight: [Level of insight]
-        • Judgment: [Judgment assessment]
+            Output Expectations:
+            - Output must strictly follow the structure defined by the {template_type.replace("_", " ").upper()} template.
+            - The output must be in valid TEXT format, using section names as headings and their respective summarized content as its content.
+            - Each section should be clinically useful, concise, and tailored to help a doctor quickly understand the case.
+            - Ensure the structure and formatting are consistent across all reports using the same template.
 
-        ## Risk Assessment:
-        • [Suicidality and homicidality assessment]
+            Use below listed formatting rules:
+            {formatting_instructions}
+            
+            Follow Up Note Template Structure:
 
-        ## Diagnosis:
-        • [Diagnosis 1]
-        • [Diagnosis 2]
-        • [Diagnosis 3]
-        • [Diagnosis 4]
+            # Follow-Up Consultation Note
 
-        ## Treatment Plan:
-        • [Medication plan]
-        • [Follow-up interval]
-        • [Upcoming tests or procedures]
+            ## Date  
+            [Provide the date of the follow-up session in the format: DD/MM/YYYY. if date not mentioned use current day's date]
 
-        ## Safety Plan:
-        • [Safety recommendations]
+            ## History of Presenting Complaints  
+            Summarize the patient’s ongoing symptoms, changes since the last session, and any new complaints. Use bullet points to list key issues:  
+            •  Describe main symptoms or complaints since last review  
+            •  Note changes in intensity, frequency, or duration  
+            •  Comment on medication adherence and side effects  
+            •  Mention sleep, appetite, energy, or concentration changes
 
-        ## Additional Notes:
-        • [Additional relevant information]
+            ## Mental Status Examination  
+            Describe the patient's current presentation during the session. Use bullet points for each domain:  
+            •  Appearance: General grooming, clothing, posture  
+            •  Behavior: Eye contact, psychomotor activity, cooperation  
+            •  Speech: Rate, volume, articulation, spontaneity  
+            •  Mood: Patient’s self-reported emotional state  
+            •  Affect: Observed emotional expression (e.g., flat, reactive)  
+            •  Thoughts: Coherence, logic, presence of intrusive or delusional thoughts  
+            •  Perceptions: Hallucinations or perceptual disturbances, if any  
+            •  Cognition: Orientation, attention, memory, executive function  
+            •  Insight: Awareness and understanding of one’s condition  
+            •  Judgment: Ability to make safe and appropriate decisions
 
-        IMPORTANT: 
-        - Your response MUST be a valid TEXT/PLAIN format exactly matching the format
-        - Only include information explicitly mentioned in the transcript
-        - If information for a field is not mentioned, ignore that and dont include it in report
-        - Do not invent information not present in the conversation
-        - Be DIRECT and CONCISE in all documentation while preserving accuracy
-        - Use professional terminology appropriate for mental health settings
-        """
-        
+            ## Risk Assessment  
+            Evaluate and document any risk factors or protective factors present:  
+            •  Assess suicidal ideation, plan, intent  
+            •  Assess homicidal thoughts or aggressive behavior  
+            •  Self-harm behaviors, recent incidents, or urges  
+            •  Protective factors (e.g., support system, coping strategies)
+
+            ## Diagnosis  
+            List all current diagnoses as per DSM-5/ICD-10 criteria:  
+            •  Primary psychiatric diagnosis  
+            •  Any comorbid psychiatric conditions  
+            •  Medical comorbidities (if relevant)  
+            •  Provisional diagnoses (if any)
+
+            ## Treatment Plan  
+            Describe current and updated management strategies:  
+            •  Medications prescribed, dosage changes, and compliance  
+            •  Recommended psychotherapy or other interventions  
+            •  Follow-up interval (e.g., 2 weeks, 1 month)  
+            •  Referrals or investigations (labs, imaging, etc.)
+
+            ## Safety Plan  
+            Outline strategies discussed to maintain safety until next contact:  
+            •  Crisis support contact details  
+            •  Steps to take if symptoms worsen  
+            •  Agreed-upon emergency contacts or hospitalisation criteria
+
+            ## Additional Notes  
+            Include any further relevant observations or discussions not captured above:  
+            •  Family involvement or concerns  
+            •  Socioeconomic issues impacting care  
+            •  Future considerations or long-term goals
+
+            (Never come up with your own patient details, assessment, plan, interventions, evaluation, and plan for continuing care - use only the transcript, contextual notes or clinical note as a reference for the information include in your note. If any information related to a placeholder has not been explicitly mentioned in the transcript, contextual notes or clinical note, you must not state the information has not been explicitly mentioned in your output, just leave the relevant placeholder or section blank.)(Use as many full sentences as needed to capture all the relevant information from the transcript.)
+
+            Begin generating the report using the transcript content and template structure provided.
+            """
+
         elif template_type == "detailed_soap_note":
             user_instructions = f"""You are provided with a medical conversation transcript. 
                 Analyze the transcript and generate a structured SOAP note following the specified template. 
@@ -3323,6 +4638,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
                 """
 
         elif template_type == "case_formulation":
+                user_instructions = user_prompt
                 system_message = """You are a mental health professional tasked with creating a concise case formulation report following the 4Ps schema (Predisposing, Precipitating, Perpetuating, and Protective factors). Based on the provided transcript of a clinical session, extract and organize relevant information into the specified sections. Use only the information explicitly provided in the transcript, and do not include or assume any additional details. Ensure the output is a valid TEXT/PLAIN document formatted professionally in a clinical tone, with no data repetition across sections. Omit any section if no relevant data is provided in the transcript, without placeholders. Convert time references (e.g., 'this morning,' 'last week') to specific dates based on today's date, June 21, 2025 (Saturday). For example, 'this morning' is 21/06/2025; 'last week' is approximately 14/06/2025; 'last Wednesday' is 18/06/2025. Format dates as DD/MM/YYYY. Use bullet points with '•  ' (Unicode bullet point U+2022 followed by two spaces) for each item in all sections.
                 {grammar_instructions} {date_instructions}
                 Below are the instructions to format the report:
@@ -3417,6 +4733,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
     """
 
         elif template_type == "discharge_summary":
+            user_instructions = user_prompt
             system_message = f"""You are a mental health professional documentation expert specializing in comprehensive discharge summaries.
         {preservation_instructions}
         {grammar_instructions}
@@ -4389,17 +5706,8 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             {date_instructions}
             """
 
-        # Make the API request to GPT - Remove the response_format parameter which is causing the error
-        user_prompt = (
-            user_instructions
-            if template_type in [
-                "h75", "new_soap_note", "mental_health_appointment", "clinical_report",
-                "cardiology_letter", "detailed_soap_note", "soap_issues", "consult_note", "referral_letter","summary"
-            ]
-            else f"Here is a medical conversation. Please format it into a structured {template_type}:\n\n{conversation_text}\nBelow is the instructions to format the report:\n{formatting_instructions}\nBelow is the date instructions {date_instructions}"
-        )
-
-        return user_prompt, system_message
+        
+        return user_instructions, system_message
 
     except Exception as e:
         main_logger.error(f"[OP-{operation_id}] Error generating prompts: {str(e)}", exc_info=True)
@@ -4489,12 +5797,38 @@ async def live_reports(
     try:
         report_status = "processing"
         valid_templates = [
-            "clinical_report", "h75", "new_soap_note", "soap_issues", "detailed_soap_note",
-            "soap_note", "progress_note", "mental_health_appointment", "cardiology_letter",
-            "followup_note", "meeting_minutes", "referral_letter",
-            "detailed_dietician_initial_assessment", "psychology_session_notes",
-            "pathology_note", "consult_note", "discharge_summary", "case_formulation", "summary"
-        ]
+            "new_soap_note",
+            "cardiology_consult",
+            "echocardiography_report_vet",
+            "cardio_consult",
+            "cardio_patient_explainer",
+            "coronary_angiograph_report",
+            "left_heart_catheterization",
+            "right_and_left_heart_study",
+            "toe_guided_cardioversion_report",
+            "hospitalist_progress_note",
+            "multiple_issues_visit",
+            "counseling_consultation",
+            "gp_consult_note",
+            "detailed_dietician_initial_assessment",
+            "referral_letter",
+            "consult_note",
+            "mental_health_appointment",
+            "clinical_report",
+            "psychology_session_notes",
+            "speech_pathology_note",
+            "progress_note",
+            "meeting_minutes",
+            "followup_note",
+            "detailed_soap_note",
+            "case_formulation",
+            "discharge_summary",
+            "h75",
+            "cardiology_letter",
+            "soap_issues",
+            "summary",
+            "physio_soap_outpatient",
+            ]
         
         if template_type not in valid_templates:
             error_msg = f"Invalid template type '{template_type}'. Must be one of: {', '.join(valid_templates)}"
@@ -5105,12 +6439,38 @@ async def transcribe_and_generate_report(
                 return JSONResponse({"status": "failed", "error": f"Invalid audio format: {audio.content_type}"}, status_code=400)
 
         valid_templates = [
-            "clinical_report", "h75", "new_soap_note", "soap_issues", "detailed_soap_note",
-            "soap_note", "progress_note", "mental_health_appointment", "cardiology_letter",
-            "followup_note", "meeting_minutes", "referral_letter",
-            "detailed_dietician_initial_assessment", "psychology_session_notes",
-            "pathology_note", "consult_note", "discharge_summary", "case_formulation", "summary",
-        ]
+            "new_soap_note",
+            "cardiology_consult",
+            "echocardiography_report_vet",
+            "cardio_consult",
+            "cardio_patient_explainer",
+            "coronary_angiograph_report",
+            "left_heart_catheterization",
+            "right_and_left_heart_study",
+            "toe_guided_cardioversion_report",
+            "hospitalist_progress_note",
+            "multiple_issues_visit",
+            "counseling_consultation",
+            "gp_consult_note",
+            "detailed_dietician_initial_assessment",
+            "referral_letter",
+            "consult_note",
+            "mental_health_appointment",
+            "clinical_report",
+            "psychology_session_notes",
+            "speech_pathology_note",
+            "progress_note",
+            "meeting_minutes",
+            "followup_note",
+            "detailed_soap_note",
+            "case_formulation",
+            "discharge_summary",
+            "h75",
+            "cardiology_letter",
+            "soap_issues",
+            "summary",
+            "physio_soap_outpatient",
+            ]
 
         if template_type not in valid_templates:
             return JSONResponse({"status": "failed", "error": f"Invalid template type: {template_type}"}, status_code=400)
