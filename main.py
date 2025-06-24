@@ -6334,6 +6334,8 @@ async def generate_report_from_transcription(transcription, template_schema, use
 """
        
         date_instructions = DATE_INSTRUCTIONS.format(reference_date=current_date)
+        if not user_prompt:
+            user_prompt = ""
 
         user_message= f"""You are provided with a medical conversation transcript.
 
@@ -6366,7 +6368,9 @@ async def generate_report_from_transcription(transcription, template_schema, use
 
             Critical data preservation rules:
             {preservation_instructions}
-        """ + user_prompt
+
+            {user_prompt}
+        """ 
 
         # Extract conversation text
         conversation_text = ""
