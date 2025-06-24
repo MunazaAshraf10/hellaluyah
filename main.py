@@ -323,27 +323,41 @@ async def live_transcription_endpoint(websocket: WebSocket):
         await websocket.send_text(json.dumps({
             "status": "ready",
             "message": "Ready to receive audio for real-time transcription",
-            "transcript_id": transcript_id  # Send early
+            "transcript_id": transcript_id
         }))
         main_logger.info(f"[{client_id}] Sent ready with transcript_id: {transcript_id}")
 
         session_data = manager.get_session_data(client_id)
-        session_data["transcript_id"] = transcript_id  # Save early
+        session_data["transcript_id"] = transcript_id
         manager.update_session_data(client_id, session_data)
 
         audio_buffer = bytearray()
 
-        deepgram_url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=16000&channels=1&model=nova-2-medical&language=en&diarize=true&punctuate=true&smart_format=true"
+        deepgram_url = (
+            "wss://api.deepgram.com/v1/listen"
+            "?encoding=linear16&sample_rate=16000&channels=1"
+            "&model=nova-2-medical&language=en&diarize=true"
+            "&punctuate=true&smart_format=true"
+        )
+
         deepgram_socket = await websockets.connect(
             deepgram_url,
             additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
         )
         main_logger.info(f"[{client_id}] Connected to Deepgram")
 
-        await asyncio.gather(
-            process_audio_stream(websocket, deepgram_socket, audio_buffer),
-            process_transcription_results(deepgram_socket, websocket, client_id)
+        
+        audio_task = asyncio.create_task(process_audio_stream(websocket, deepgram_socket, audio_buffer))
+        transcript_task = asyncio.create_task(process_transcription_results(deepgram_socket, websocket, client_id))
+
+        done, pending = await asyncio.wait(
+            [audio_task, transcript_task],
+            return_when=asyncio.FIRST_EXCEPTION  # or FIRST_COMPLETED
         )
+
+        for task in pending:
+            task.cancel()
+
 
         audio_info = await save_audio_to_s3(bytes(audio_buffer))
         if audio_info:
@@ -352,8 +366,18 @@ async def live_transcription_endpoint(websocket: WebSocket):
             error_logger.error(f"[{client_id}] Audio saving failed")
 
         transcript_data = manager.get_session_data(client_id).get("transcription", {})
-        await save_transcript_to_dynamodb(transcript_data, audio_info, status="completed",transcript_id= transcript_id)
+        await save_transcript_to_dynamodb(transcript_data, audio_info, status="completed", transcript_id=transcript_id)
         main_logger.info(f"[{client_id}] Transcript saved: {transcript_id}")
+
+        try:
+            await websocket.send_text(json.dumps({
+                "status": "transcription_saved",
+                "transcript_id": transcript_id
+            }))
+            await websocket.close()
+            main_logger.info(f"[{client_id}] WebSocket closed after transcription_saved")
+        except RuntimeError as e:
+            error_logger.warning(f"[{client_id}] Cannot send transcription_saved (WebSocket likely closed): {str(e)}")
 
     except WebSocketDisconnect:
         main_logger.warning(f"[{client_id}] WebSocket disconnected")
@@ -367,67 +391,71 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
     try:
         while True:
             message = await websocket.receive()
+
             if "bytes" in message:
                 data = message["bytes"]
                 audio_buffer.extend(data)
                 await deepgram_socket.send(data)
+
             elif "text" in message:
-                if message["text"] == '{"type":"end_audio"}':
-                    await deepgram_socket.send(message["text"])
-                    await websocket.close()  
-                    main_logger.info("Received end_audio signal. Closing socket.")
-                    break
+                try:
+                    data = json.loads(message["text"])
+                    if data.get("type") == "CloseStream":
+                        await deepgram_socket.send(json.dumps(data))
+                        main_logger.info("Received CloseStream signal. Ending audio stream.")
+                        break
+                except json.JSONDecodeError:
+                    error_logger.warning("Received non-JSON text message, ignoring.")
     except WebSocketDisconnect:
         main_logger.warning("WebSocket disconnected during audio stream")
+        raise
     except Exception as e:
         error_logger.error(f"Audio stream error: {str(e)}\n{traceback.format_exc()}")
+        raise
 
 async def process_transcription_results(deepgram_socket, websocket, client_id):
-    """Process transcription results from Deepgram and send to client."""
     try:
         while True:
             try:
-                print("⏳ Waiting for transcription from Deepgram...")
+                main_logger.info(f"[{client_id}]  Waiting for transcription from Deepgram...")
                 response = await deepgram_socket.recv()
-                print(f"📥 Received response from Deepgram: {response}")
-                
+                main_logger.info(f"[{client_id}]  Received response from Deepgram: {response}")
+
                 if isinstance(response, str):
                     data = json.loads(response)
-                    
+
                     if "channel" in data and "alternatives" in data["channel"]:
                         transcript = data["channel"]["alternatives"][0]
                         is_final = data.get("is_final", False)
-                        
-                        # Extract speaker if available
-                        speaker = "Speaker 1"  # Default speaker
+
+                        speaker = "Speaker 1"
                         if "words" in transcript and transcript["words"]:
                             if "speaker" in transcript["words"][0]:
                                 speaker = f"Speaker {transcript['words'][0]['speaker']}"
-                        
+
                         message = {
                             "type": "transcript",
                             "text": transcript["transcript"],
                             "speaker": speaker,
                             "is_final": is_final
                         }
-                        
-                        print(f"📤 Sending transcription to client {client_id}:")
-                        print(f"   Speaker: {speaker}")
-                        print(f"   Text: {transcript['transcript']}")
-                        print(f"   Is Final: {is_final}")
-                        
-                        await websocket.send_text(json.dumps(message))
-                        print("✅ Transcription sent to client")
 
-                        # Only process if it's a transcript
+                        main_logger.info(f"[{client_id}]    Sending transcription to client:")
+                        main_logger.info(f"[{client_id}]    Speaker: {speaker}")
+                        main_logger.info(f"[{client_id}]    Text: {transcript['transcript']}")
+                        main_logger.info(f"[{client_id}]    Is Final: {is_final}")
+
+                        try:
+                            await websocket.send_text(json.dumps(message))
+                            main_logger.info(f"[{client_id}] Transcription sent to client")
+                        except RuntimeError:
+                            error_logger.warning(f"[{client_id}] Could not send transcription (WebSocket likely closed)")
+
                         if data.get("type") == "Results":
-                            # Extract the transcript text and speaker
-                            transcript_text = data["channel"]["alternatives"][0]["transcript"]
+                            transcript_text = transcript["transcript"]
                             words = transcript.get("words", [])
                             speaker = f"Speaker {words[0]['speaker']}" if words and 'speaker' in words[0] else "Speaker 0"
-                            is_final = data.get("is_final", False)
 
-                            # Add to session data
                             session_data = manager.get_session_data(client_id)
                             if "transcription" not in session_data:
                                 session_data["transcription"] = {"conversation": []}
@@ -438,17 +466,17 @@ async def process_transcription_results(deepgram_socket, websocket, client_id):
                                     "is_final": is_final
                                 })
                             manager.update_session_data(client_id, session_data)
+
             except websockets.exceptions.ConnectionClosed:
-                print("❌ Deepgram connection closed")
+                main_logger.warning(f"[{client_id}] Deepgram connection closed")
                 break
             except Exception as e:
-                print(f"❌ Error processing Deepgram response: {str(e)}")
-                print(f"Error details: {traceback.format_exc()}")
+                error_logger.error(f"[{client_id}] Error processing Deepgram response: {str(e)}")
+                error_logger.error(f"Error details: {traceback.format_exc()}")
                 break
-            
     except Exception as e:
-        print(f"❌ Error in process_transcription_results: {str(e)}")
-        print(f"Error details: {traceback.format_exc()}")
+        error_logger.error(f"[{client_id}] Error in process_transcription_results: {str(e)}")
+        error_logger.error(f"Error details: {traceback.format_exc()}")
         raise
 
 
