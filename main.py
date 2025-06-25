@@ -2043,7 +2043,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             2. Cardiac Risk Factors:
             - List under the heading "CARDIAC RISK FACTORS" in the following order: Increased BMI, Hypertension, Dyslipidemia, Diabetes mellitus, Smoker, Ex-smoker, Family history of atherosclerotic disease in first-degree relatives.
             - For each risk factor, use verbatim text from contextual notes if available, updating only with new or differing information from the transcript.
-            - If no information is provided in the transcript or context, write "None known" for each risk factor.
+            - If no information is provided in the transcript or context, ignore that stuff.
             - For Smoker, include pack-years, years smoked, and number of cigarettes or packs per day if mentioned in the transcript or context.
             - For Ex-smoker, include only if the patient is not currently smoking. State the year quit and whether they quit remotely (e.g., "quit remotely in 2015") if mentioned. Omit this section if the patient is a current smoker.
             - For Family history of atherosclerotic disease, specify if the patient’s mother, father, sister, brother, or child had a myocardial infarction, coronary angioplasty, coronary stenting, coronary bypass, peripheral arterial procedure, or stroke prior to age 55 (men) or 65 (women), as mentioned in the transcript or context.
@@ -5137,6 +5137,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             Always include Differential Diagnosis.
             List one subheading only once.
             Dont add '•  '  with subheadings, just with its content add '•  ' .
+            If the data is not available for somthing ignore that subheading dont write any placeholders in its place.
         
 
             Instructions:
@@ -12215,7 +12216,47 @@ async def generate_template_report(
             "error": error_msg,
             "report_status": "failed"
         }, status_code=500)
-       
+
+
+valid_templates = [
+    "new_soap_note",
+    "cardiology_consult",
+    "echocardiography_report_vet",
+    "cardio_consult",
+    "cardio_patient_explainer",
+    "coronary_angiograph_report",
+    "left_heart_catheterization",
+    "right_and_left_heart_study",
+    "toe_guided_cardioversion_report",
+    "hospitalist_progress_note",
+    "multiple_issues_visit",
+    "counseling_consultation",
+    "gp_consult_note",
+    "detailed_dietician_initial_assessment",
+    "referral_letter",
+    "consult_note",
+    "mental_health_appointment",
+    "clinical_report",
+    "psychology_session_notes",
+    "speech_pathology_note",
+    "progress_note",
+    "meeting_minutes",
+    "followup_note",
+    "detailed_soap_note",
+    "case_formulation",
+    "discharge_summary",
+    "h75",
+    "cardiology_letter",
+    "soap_issues",
+    "summary",
+    "physio_soap_outpatient",
+]
+
+
+@app.get("/valid-templates")
+def get_valid_templates():
+    return JSONResponse(content={"templates": valid_templates})
+     
 # ... (Previous code remains unchanged up to the WebSocket endpoint definition)
 @app.websocket("/ws/transcribe-and-generate-report")
 @log_execution_time
