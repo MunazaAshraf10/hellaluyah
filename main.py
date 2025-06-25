@@ -412,28 +412,77 @@ async def live_transcription_endpoint(websocket: WebSocket):
 
 async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buffer=None):
     try:
+        client_id = websocket.client.host  # or pass client_id directly if stored separately
+
         while True:
             message = await websocket.receive()
 
             if "bytes" in message:
                 data = message["bytes"]
+
+                session_data = manager.get_session_data(client_id)
+                is_paused = session_data.get("paused", False)
+
+                if is_paused:
+                    main_logger.info(f"[{client_id}] Audio stream paused. Skipping audio chunk.")
+                    continue
+
+                # Buffer and forward audio
                 audio_buffer.extend(data)
                 await deepgram_socket.send(data)
 
             elif "text" in message:
                 try:
                     data = json.loads(message["text"])
-                    if data.get("type") == "CloseStream":
+                    msg_type = data.get("type")
+
+                    if msg_type == "CloseStream":
                         await deepgram_socket.send(json.dumps(data))
-                        main_logger.info("Received CloseStream signal. Ending audio stream.")
+                        main_logger.info(f"[{client_id}] Received CloseStream signal. Ending audio stream.")
                         break
+
+                    elif msg_type == "PauseStream":
+                        main_logger.info(f"[{client_id}] Pausing audio stream.")
+                        session_data = manager.get_session_data(client_id)
+                        session_data["paused"] = True
+
+                        # Optional: mark pause in conversation
+                        if "transcription" in session_data:
+                            session_data["transcription"]["conversation"].append({
+                                "speaker": "System",
+                                "text": "[Recording Paused]",
+                                "is_final": True
+                            })
+
+                        manager.update_session_data(client_id, session_data)
+
+                    elif msg_type == "ResumeStream":
+                        main_logger.info(f"[{client_id}] Resuming audio stream.")
+                        session_data = manager.get_session_data(client_id)
+                        session_data["paused"] = False
+
+                        # Optional: mark resume in conversation
+                        if "transcription" in session_data:
+                            session_data["transcription"]["conversation"].append({
+                                "speaker": "System",
+                                "text": "[Recording Resumed]",
+                                "is_final": True
+                            })
+
+                        manager.update_session_data(client_id, session_data)
+
+                    else:
+                        main_logger.debug(f"[{client_id}] Unknown message type received: {msg_type}")
+
                 except json.JSONDecodeError:
-                    error_logger.warning("Received non-JSON text message, ignoring.")
+                    error_logger.warning(f"[{client_id}] Received non-JSON text message, ignoring.")
+
     except WebSocketDisconnect:
-        main_logger.warning("WebSocket disconnected during audio stream")
+        main_logger.warning(f"[{client_id}] WebSocket disconnected during audio stream")
         raise
+
     except Exception as e:
-        error_logger.error(f"Audio stream error: {str(e)}\n{traceback.format_exc()}")
+        error_logger.error(f"[{client_id}] Audio stream error: {str(e)}\n{traceback.format_exc()}")
         raise
 
 async def process_transcription_results(deepgram_socket, websocket, client_id):
