@@ -365,19 +365,43 @@ async def live_transcription_endpoint(websocket: WebSocket):
         else:
             error_logger.error(f"[{client_id}] Audio saving failed")
 
-        transcript_data = manager.get_session_data(client_id).get("transcription", {})
+        # Fetch session data and transcription
+        session_data = manager.get_session_data(client_id)
+        transcript_data = session_data.get("transcription")
+
+        # Ensure fallback if transcription is missing or empty
+        if not transcript_data:
+            transcript_data = {
+                "conversation": [],
+                "metadata": {
+                    "duration": 0,
+                    "channels": 1
+                }
+            }
+
+        # Save transcript
         await save_transcript_to_dynamodb(transcript_data, audio_info, status="completed", transcript_id=transcript_id)
         main_logger.info(f"[{client_id}] Transcript saved: {transcript_id}")
 
+        # Prepare the final response with `status`
+        response_payload = {
+            "status": "transcription_saved",
+            "transcript_id": transcript_id,
+            "transcription": {
+                "id": transcript_id,
+                "transcript": json.dumps(transcript_data),
+            },
+            "reports": []
+        }
+
+        # Send it
         try:
-            await websocket.send_text(json.dumps({
-                "status": "transcription_saved",
-                "transcript_id": transcript_id
-            }))
+            await websocket.send_text(json.dumps(response_payload))
             await websocket.close()
-            main_logger.info(f"[{client_id}] WebSocket closed after transcription_saved")
+            main_logger.info(f"[{client_id}] WebSocket closed after final response")
         except RuntimeError as e:
-            error_logger.warning(f"[{client_id}] Cannot send transcription_saved (WebSocket likely closed): {str(e)}")
+            error_logger.warning(f"[{client_id}] Cannot send final response (WebSocket likely closed): {str(e)}")
+
 
     except WebSocketDisconnect:
         main_logger.warning(f"[{client_id}] WebSocket disconnected")
