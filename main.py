@@ -389,11 +389,10 @@ async def live_transcription_endpoint(websocket: WebSocket):
             "transcript_id": transcript_id,
             "transcription": {
                 "id": transcript_id,
-                "transcript": json.dumps(transcript_data),
+                "transcript": transcript_data,
             },
             "reports": []
         }
-
         # Send it
         try:
             await websocket.send_text(json.dumps(response_payload))
