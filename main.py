@@ -1,5 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, Form, WebSocket, WebSocketDisconnect, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
+import shutil
 from fastapi import Query, HTTPException
 from logging.handlers import RotatingFileHandler
 import tempfile
@@ -12451,62 +12452,83 @@ stress_main_logger = setup_logger("stress_main", f"{STRESS_LOG_DIR}/main.log")
 stress_time_logger = setup_logger("stress_time", f"{STRESS_LOG_DIR}/time.log")
 stress_error_logger = setup_logger("stress_error", f"{STRESS_LOG_DIR}/exceptions.log")
 
+import mimetypes
+from aiohttp import MultipartWriter
 
 async def transcribe_and_generate_reports(audio_path: str, session: aiohttp.ClientSession, index: int):
     try:
         with open(audio_path, "rb") as f:
             audio_data = f.read()
 
+        # Determine content type from extension
+        content_type, _ = mimetypes.guess_type(audio_path)
+        if not content_type:
+            content_type = "application/octet-stream"
+
         start = time.time()
-        form = aiohttp.FormData()
-        form.add_field("audio", audio_data, filename="audio.wav", content_type="audio/wav")
 
-        async with session.post(TRANSCRIBE_URL, data=form) as resp:
-            transcription_result = await resp.json()
-            elapsed = time.time() - start
+        # ✅ Build multipart request manually (avoids reuse issues)
+        with MultipartWriter("form-data") as mpwriter:
+            part = mpwriter.append(audio_data)
+            part.set_content_disposition('form-data', name='audio', filename=audio_path.split("/")[-1])
+            part.headers['Content-Type'] = content_type
 
-            if resp.status != 200 or not transcription_result.get("transcript_id"):
-                stress_error_logger.error(f"Transcription failed (#{index}): {transcription_result}")
-                return
+            async with session.post(TRANSCRIBE_URL, data=mpwriter) as resp:
+                transcription_result = await resp.json()
+                elapsed = time.time() - start
 
-            transcript_id = transcription_result["transcript_id"]
-            stress_main_logger.info(f"[{index}] Transcription completed: {transcript_id}")
-            stress_time_logger.info(f"[{index}] Transcription took {elapsed:.2f}s")
+                if resp.status != 200 or not transcription_result.get("transcript_id"):
+                    stress_error_logger.error(f"Transcription failed (#{index}): {transcription_result}")
+                    return
 
-            # Save transcription response
-            with open(f"{STRESS_LOG_DIR}/responses/transcription_{transcript_id}.json", "w") as f:
-                json.dump(transcription_result, f, indent=2)
+                transcript_id = transcription_result["transcript_id"]
+                stress_main_logger.info(f"[{index}] Transcription completed: {transcript_id}")
+                stress_time_logger.info(f"[{index}] Transcription took {elapsed:.2f}s")
+
+                with open(f"{STRESS_LOG_DIR}/responses/transcription_{transcript_id}.json", "w") as f:
+                    json.dump(transcription_result, f, indent=2)
 
     except Exception as e:
         stress_error_logger.exception(f"Transcription exception (#{index}): {e}")
         return
 
-    # Generate reports
+    # 🔁 Report Generation
     try:
         report_start = time.time()
         for template in TEMPLATES:
-            form = aiohttp.FormData()
-            form.add_field("transcript_id", transcript_id)
-            form.add_field("template_type", template)
-
             try:
-                async with session.post(LIVE_REPORTING_URL, data=form) as response:
-                    raw_text = await response.text()
-                    if "---meta:::" in raw_text and ":::meta---" in raw_text:
-                        meta_block = raw_text.split(":::meta---")[0].replace("---meta:::", "").strip()
-                        markdown_block = raw_text.split(":::meta---")[1].strip()
-                        report_json = {
-                            "template_type": template,
-                            "metadata": json.loads(meta_block),
-                            "report_markdown": markdown_block
-                        }
-                    else:
-                        report_json = {"template_type": template, "error": "Malformed response", "raw": raw_text}
+                # 🔹 New multipart for each template
+                with MultipartWriter("form-data") as report_writer:
+                    part1 = report_writer.append(transcript_id)
+                    part1.set_content_disposition("form-data", name="transcript_id")
 
-                    with open(f"{STRESS_RESP_DIR}/{transcript_id}_{template}.json", "w") as rf:
-                        json.dump(report_json, rf, indent=2)
+                    part2 = report_writer.append(template)
+                    part2.set_content_disposition("form-data", name="template_type")
 
-                    stress_main_logger.info(f"Report: {template} for {transcript_id} (Status {response.status})")
+                    async with session.post(LIVE_REPORTING_URL, data=report_writer) as response:
+                        raw_text = await response.text()
+
+                        if "---meta:::" in raw_text and ":::meta---" in raw_text:
+                            meta_block = raw_text.split(":::meta---")[0].replace("---meta:::", "").strip()
+                            markdown_block = raw_text.split(":::meta---")[1].strip()
+                            report_json = {
+                                "template_type": template,
+                                "metadata": json.loads(meta_block),
+                                "report_markdown": markdown_block
+                            }
+                        else:
+                            report_json = {
+                                "template_type": template,
+                                "error": "Malformed response",
+                                "raw": raw_text
+                            }
+
+                        with open(f"{STRESS_RESP_DIR}/{transcript_id}_{template}.json", "w") as rf:
+                            json.dump(report_json, rf, indent=2)
+
+                        stress_main_logger.info(
+                            f"Report: {template} for {transcript_id} (Status {response.status})"
+                        )
 
             except Exception as e:
                 stress_error_logger.error(f"Error in report {template} for {transcript_id}: {e}")
@@ -12517,7 +12539,6 @@ async def transcribe_and_generate_reports(audio_path: str, session: aiohttp.Clie
     except Exception as e:
         stress_error_logger.exception(f"Report generation failed for {transcript_id}: {e}")
 
-
 async def run_stress_test_serial(audio_paths: List[str]):
     stress_main_logger.info("Starting stress test (serial)...")
     async with aiohttp.ClientSession() as session:
@@ -12526,7 +12547,6 @@ async def run_stress_test_serial(audio_paths: List[str]):
             stress_main_logger.info(f"Running test #{i+1} on audio: {os.path.basename(audio_path)}")
             await transcribe_and_generate_reports(audio_path, session, i + 1)
     stress_main_logger.info("🏁 Stress test completed.")
-
 
 @app.post("/stress-test")
 async def stress_test_endpoint(background_tasks: BackgroundTasks, audios: List[UploadFile] = File(...)):
@@ -12544,8 +12564,6 @@ async def stress_test_endpoint(background_tasks: BackgroundTasks, audios: List[U
         "responses_dir": f"{STRESS_LOG_DIR}/responses"
     }
 
-
-
 @app.post("/stress-test2")
 async def stress_test_endpoint_2(background_tasks: BackgroundTasks, audios: List[UploadFile] = File(...)):
     temp_paths = []
@@ -12561,7 +12579,6 @@ async def stress_test_endpoint_2(background_tasks: BackgroundTasks, audios: List
         "logs_dir": STRESS_LOG_DIR,
         "responses_dir": f"{STRESS_LOG_DIR}/responses"
     }
-
 
 @app.post("/stress-test3")
 async def stress_test_endpoint_3(background_tasks: BackgroundTasks, audios: List[UploadFile] = File(...)):
@@ -12664,6 +12681,37 @@ def get_stress_logs(
         return PlainTextResponse(msg, status_code=400)
     
     return PlainTextResponse("".join(selected))
+
+
+# Clean logs endpoint
+@app.delete("/clean-stress-logs")
+async def delete_stress_logs():
+    try:
+        # Step 1: Close logger handlers
+        for logger in [logging.getLogger("stress_main"), logging.getLogger("stress_time"), logging.getLogger("stress_error")]:
+            for handler in logger.handlers[:]:
+                handler.close()
+                logger.removeHandler(handler)
+
+        # Step 2: Delete folder
+        if os.path.exists(STRESS_LOG_DIR):
+            shutil.rmtree(STRESS_LOG_DIR)
+
+        # Step 3: Recreate folders
+        os.makedirs(STRESS_RESP_DIR, exist_ok=True)
+        os.makedirs(f"{STRESS_LOG_DIR}/responses", exist_ok=True)
+
+        # Step 4: Reinitialize loggers
+        global stress_main_logger, stress_time_logger, stress_error_logger
+        stress_main_logger = setup_logger("stress_main", f"{STRESS_LOG_DIR}/main.log")
+        stress_time_logger = setup_logger("stress_time", f"{STRESS_LOG_DIR}/time.log")
+        stress_error_logger = setup_logger("stress_error", f"{STRESS_LOG_DIR}/exceptions.log")
+
+        return {"status": "success", "message": "Stress logs cleaned and loggers reinitialized."}
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 
 # ... (Previous code remains unchanged up to the WebSocket endpoint definition)
 @app.websocket("/ws/transcribe-and-generate-report")
