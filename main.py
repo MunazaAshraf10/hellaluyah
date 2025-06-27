@@ -12683,6 +12683,46 @@ def get_stress_logs(
     return PlainTextResponse("".join(selected))
 
 
+
+LOGGING_DIR = "logging"
+
+LOG_PATHS = {
+    "main": f"{LOGGING_DIR}/main.log",
+    "time": f"{LOGGING_DIR}/time.log",
+    "error": f"{LOGGING_DIR}/exceptions.log",
+    "api": f"{LOGGING_DIR}/api.log",
+    "db": f"{LOGGING_DIR}/database.log",
+}
+
+@app.delete("/clean-logs")
+async def clean_logging_logs():
+    try:
+        # Step 1: Close all handlers
+        for name in LOG_PATHS.keys():
+            logger = logging.getLogger(name)
+            for handler in logger.handlers[:]:
+                handler.close()
+                logger.removeHandler(handler)
+
+        # Step 2: Truncate each file
+        for path in LOG_PATHS.values():
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.truncate()
+
+        # Step 3: Re-setup loggers
+        global main_logger, time_logger, error_logger, api_logger, db_logger
+        main_logger = setup_logger("main", LOG_PATHS["main"])
+        time_logger = setup_logger("time", LOG_PATHS["time"])
+        error_logger = setup_logger("error", LOG_PATHS["error"])
+        api_logger = setup_logger("api", LOG_PATHS["api"])
+        db_logger = setup_logger("db", LOG_PATHS["db"])
+
+        return {"status": "success", "message": "Logging files cleaned and loggers reinitialized."}
+    
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    
 # Clean logs endpoint
 @app.delete("/clean-stress-logs")
 async def delete_stress_logs():
