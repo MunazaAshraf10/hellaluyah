@@ -1,5 +1,13 @@
 from fastapi import FastAPI, File, UploadFile, Form, WebSocket, WebSocketDisconnect, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
+from fastapi import Query, HTTPException
+from logging.handlers import RotatingFileHandler
+import tempfile
+import aiofiles
+from fastapi import Query
+from fastapi.responses import PlainTextResponse
+from pathlib import Path
+import aiohttp
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import httpx
@@ -394,12 +402,16 @@ async def live_transcription_endpoint(websocket: WebSocket):
             "reports": []
         }
         # Send it
-        try:
-            await websocket.send_text(json.dumps(response_payload))
-            await websocket.close()
-            main_logger.info(f"[{client_id}] WebSocket closed after final response")
-        except RuntimeError as e:
-            error_logger.warning(f"[{client_id}] Cannot send final response (WebSocket likely closed): {str(e)}")
+        if websocket.client_state.name != "DISCONNECTED":
+            try:
+                await websocket.send_text(json.dumps(response_payload))
+                await websocket.close()
+                main_logger.info(f"[{client_id}] WebSocket closed after final response")
+            except RuntimeError as e:
+                error_logger.warning(f"[{client_id}] Cannot send final response (WebSocket likely closed): {str(e)}")
+        else:
+            error_logger.warning(f"[{client_id}] Final response not sent: WebSocket already disconnected")
+
 
 
     except WebSocketDisconnect:
@@ -412,10 +424,14 @@ async def live_transcription_endpoint(websocket: WebSocket):
 
 async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buffer=None):
     try:
-        client_id = websocket.client.host  # or pass client_id directly if stored separately
+        client_id = websocket.client.host  # Or pass as parameter
 
         while True:
-            message = await websocket.receive()
+            try:
+                message = await websocket.receive()
+            except RuntimeError as e:
+                error_logger.warning(f"[{client_id}] Cannot receive (WebSocket likely disconnected): {e}")
+                break
 
             if "bytes" in message:
                 data = message["bytes"]
@@ -429,7 +445,11 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
 
                 # Buffer and forward audio
                 audio_buffer.extend(data)
-                await deepgram_socket.send(data)
+                try:
+                    await deepgram_socket.send(data)
+                except Exception as e:
+                    error_logger.error(f"[{client_id}] Failed to send audio to Deepgram: {e}")
+                    break
 
             elif "text" in message:
                 try:
@@ -445,30 +465,24 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
                         main_logger.info(f"[{client_id}] Pausing audio stream.")
                         session_data = manager.get_session_data(client_id)
                         session_data["paused"] = True
-
-                        # Optional: mark pause in conversation
                         if "transcription" in session_data:
                             session_data["transcription"]["conversation"].append({
                                 "speaker": "System",
                                 "text": "[Recording Paused]",
                                 "is_final": True
                             })
-
                         manager.update_session_data(client_id, session_data)
 
                     elif msg_type == "ResumeStream":
                         main_logger.info(f"[{client_id}] Resuming audio stream.")
                         session_data = manager.get_session_data(client_id)
                         session_data["paused"] = False
-
-                        # Optional: mark resume in conversation
                         if "transcription" in session_data:
                             session_data["transcription"]["conversation"].append({
                                 "speaker": "System",
                                 "text": "[Recording Resumed]",
                                 "is_final": True
                             })
-
                         manager.update_session_data(client_id, session_data)
 
                     else:
@@ -479,11 +493,8 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
 
     except WebSocketDisconnect:
         main_logger.warning(f"[{client_id}] WebSocket disconnected during audio stream")
-        raise
-
     except Exception as e:
         error_logger.error(f"[{client_id}] Audio stream error: {str(e)}\n{traceback.format_exc()}")
-        raise
 
 async def process_transcription_results(deepgram_socket, websocket, client_id):
     try:
@@ -993,7 +1004,9 @@ async def save_to_aws(transcription, gpt_response, formatted_report, template_ty
 @app.post("/ask-ai")
 async def ask_ai(prompt: str = Form(...)):
 
+    operation_id = str(uuid.uuid4())[:8]
     if not prompt:
+        error_logger.warning(f"[OP-{operation_id}] Missing prompt in /ask-ai request")
         return {"error": "Missing prompt"}
     
     SYSTEM_MESSAGE = (
@@ -1012,7 +1025,7 @@ async def ask_ai(prompt: str = Form(...)):
                     {"role": "system", "content": SYSTEM_MESSAGE},
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.7,
+                temperature=0.4,
                 stream=True,
             )
 
@@ -1020,9 +1033,10 @@ async def ask_ai(prompt: str = Form(...)):
                 if chunk.choices and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
 
+            main_logger.info(f"[OP-{operation_id}] Completed streaming AI response")
 
         except Exception as e:
-            error_logger.error(f"Streaming error: {str(e)}")
+            error_logger.error(f"[OP-{operation_id}] Streaming error: {str(e)}", exc_info=True)
             yield "\n[Error streaming response]"
 
     return StreamingResponse(
@@ -1491,7 +1505,6 @@ async def generate_ai_summary(transcript_id: str):
             {"error": f"Failed to generate AI summary: {str(e)}"},
             status_code=500
         )
-
 
 @app.get("/transcription-history")
 async def get_transcription_history():
@@ -5821,7 +5834,9 @@ async def stream_openai_report(transcription: dict, template_type: str) -> Async
     """
     operation_id = str(uuid.uuid4())[:8]
     try:
+        main_logger.info(f"[OP-{operation_id}] Preparing prompts for template: {template_type}")
         user_prompt, system_message = await fetch_prompts(transcription, template_type)
+       
         main_logger.info(f"[OP-{operation_id}] Initiating OpenAI streaming for template: {template_type}")
         stream = await clients.chat.completions.create(  # No await here; it's an async generator
             model="gpt-4.1",
@@ -5835,9 +5850,12 @@ async def stream_openai_report(transcription: dict, template_type: str) -> Async
         async for chunk in stream:  # Correctly iterate over the stream
             content = chunk.choices[0].delta.content or ""
             yield content
+        
+        main_logger.info(f"[OP-{operation_id}] Completed streaming for template: {template_type}")
+
     except Exception as e:
-        error_msg = f"Error streaming OpenAI report: {str(e)}"
-        error_logger.error(error_msg)
+        error_msg = f"[OP-{operation_id}] Error streaming OpenAI report: {str(e)}"
+        error_logger.error(error_msg, exc_info=True)
         yield f"Error: {error_msg}"
 
 async def save_report_background(
@@ -5851,7 +5869,8 @@ async def save_report_background(
     Background task to save report to DynamoDB.
     """
     try:
-        # Validate gpt_response to avoid saving error messages
+        main_logger.info(f"[REPORT-SAVE] Saving report {report_id} for transcript {transcript_id} with status '{status}'")
+
         if gpt_response.startswith("Error:"):
             status = "failed"
             error_logger.error(f"Invalid report content: {gpt_response}")
@@ -5864,10 +5883,14 @@ async def save_report_background(
             status,
             report_id,
         )
-        main_logger.info(f"Background task saved report {report_id} for transcript {transcript_id}")
+        if status == "failed":
+            error_logger.info(f"[REPORT-SAVE] Report marked as failed for transcript {transcript_id}")
+        else:
+            main_logger.info(f"[REPORT-SAVE] Successfully saved report {saved_report_id} for transcript {transcript_id}")
+
     except Exception as e:
-        error_msg = f"Error in background report saving: {str(e)}"
-        error_logger.error(error_msg)
+        error_msg = f"[REPORT-SAVE] Exception while saving report {report_id}: {str(e)}"
+        error_logger.error(error_msg, exc_info=True)
         # Save with failed status
         await save_report_to_dynamodb(
             transcript_id,
@@ -5897,6 +5920,9 @@ async def live_reports(
         StreamingResponse with report content
     """
     try:
+        main_logger.info(f"[LIVE_REPORTING] Request received | transcript_id={transcript_id} | template_type={template_type}")
+        time_logger.info(f"[LIVE_REPORTING] Started processing for transcript_id={transcript_id}")
+
         report_status = "processing"
         valid_templates = [
             "new_soap_note",
@@ -5940,7 +5966,7 @@ async def live_reports(
                 status_code=400
             )
 
-        # Retrieve transcript
+        main_logger.info(f"[LIVE_REPORTING] Valid template confirmed: {template_type}")
         table = dynamodb.Table('transcripts')
         response = table.get_item(Key={"id": transcript_id})
         
@@ -5952,14 +5978,18 @@ async def live_reports(
                 status_code=404
             )
 
+        main_logger.info(f"[LIVE_REPORTING] Transcript fetched successfully for ID: {transcript_id}")
+
         transcript_item = response['Item']
         transcript_data = transcript_item.get('transcript', '{}')
 
         if isinstance(transcript_data, (bytes, boto3.dynamodb.types.Binary)):
             transcript_data = decrypt_data(transcript_data).decode('utf-8')
+            main_logger.info(f"[LIVE_REPORTING] Transcript decrypted for ID: {transcript_id}")
 
         try:
             transcription = json.loads(transcript_data)
+            main_logger.info(f"[LIVE_REPORTING] Transcript JSON parsed successfully")
         except json.JSONDecodeError:
             error_msg = "Invalid transcript data format"
             error_logger.error(error_msg)
@@ -5969,6 +5999,8 @@ async def live_reports(
             )
         # Generate a report_id now to pass along and use later
         report_id = str(uuid.uuid4())
+        main_logger.info(f"[LIVE_REPORTING] Generated report_id={report_id} for transcript_id={transcript_id}")
+
         # Collect streamed response for saving
         gpt_response = ""
         async def stream_and_collect() -> AsyncGenerator[str, None]:
@@ -5976,12 +6008,18 @@ async def live_reports(
 
             metadata = json.dumps({"template_type": template_type, "report_id": report_id})
             yield f"---meta:::{metadata}:::meta---\n"
+            main_logger.info(f"[LIVE_REPORTING] Streaming initiated | report_id={report_id}")
             
-            async for chunk in stream_openai_report(transcription, template_type):
-                gpt_response += chunk
-                yield chunk
+            try:
+                async for chunk in stream_openai_report(transcription, template_type):
+                    gpt_response += chunk
+                    yield chunk
+            except Exception as e:
+                error_logger.exception(f"[LIVE_REPORTING] Error during streaming report: {str(e)}")
+                raise
 
             # Schedule background task after streaming completes
+            main_logger.info(f"[LIVE_REPORTING] Streaming complete. Scheduling background save task for report_id={report_id}")
             background_tasks.add_task(
                 save_report_background,
                 transcript_id,
@@ -5991,7 +6029,7 @@ async def live_reports(
                 report_id  # pass this explicitly
             )
 
-        main_logger.info(f"Streaming report for transcript {transcript_id}, template {template_type}")
+        main_logger.info(f"[LIVE_REPORTING] Returning StreamingResponse for report_id={report_id}")
         return StreamingResponse(
             stream_and_collect(),
             media_type="text/plain"
@@ -6022,6 +6060,9 @@ async def transcribe_audio(
         audio: WAV audio file to process
     """
     try:
+        main_logger.info(f"[TRANSCRIBE_AUDIO] Request received | filename={audio.filename}, content_type={audio.content_type}")
+        time_logger.info(f"[TRANSCRIBE_AUDIO] Start processing for {audio.filename}")
+
         # Log incoming request details
         main_logger.info(f"Received transcribe request - Filename: {audio.filename}, Content-Type: {audio.content_type}")
 
@@ -6050,9 +6091,9 @@ async def transcribe_audio(
             valid_extensions = [".wav", ".mp3", ".mp4", ".m4a", ".flac", ".aac", ".ogg", ".webm", ".amr", ".3gp"]
             file_extension = os.path.splitext(audio.filename.lower())[1]
             if file_extension in valid_extensions:
-                main_logger.info(f"Audio content-type not recognized ({audio.content_type}), but filename has valid extension: {file_extension}")
+                main_logger.warning(f"[TRANSCRIBE_AUDIO] Unrecognized content-type ({audio.content_type}), but valid extension: {file_extension}")
             else:
-                error_msg = f"Invalid audio format. Expected audio file, got {audio.content_type}"
+                error_msg = f"[TRANSCRIBE_AUDIO] Invalid audio format: {audio.content_type}"
                 error_logger.error(error_msg)
                 return JSONResponse({
                     "status": "failed",
@@ -6063,7 +6104,7 @@ async def transcribe_audio(
         # Read the audio file
         audio_data = await audio.read()
         if not audio_data:
-            error_msg = "No audio data provided"
+            error_msg = "[TRANSCRIBE_AUDIO] No audio data found in request"
             error_logger.error(error_msg)
             return JSONResponse({
                 "status": "failed",
@@ -6071,7 +6112,7 @@ async def transcribe_audio(
                 "transcription_status": "failed"
             }, status_code=400)
 
-        main_logger.info(f"Audio file read successfully. Size: {len(audio_data)} bytes")
+        main_logger.info(f"[TRANSCRIBE_AUDIO] Audio read successful | size={len(audio_data)} bytes")
 
         # Initialize status tracking
         transcription_status = "processing"
@@ -6080,10 +6121,13 @@ async def transcribe_audio(
 
         try:
             # Transcribe audio
+            main_logger.info("[TRANSCRIBE_AUDIO] Starting transcription with diarization")
             transcription_result = await transcribe_audio_with_diarization(audio_data)
             transcription_status = "completed"
+            main_logger.info("[TRANSCRIBE_AUDIO] Transcription completed")
             
             # Save transcription to DynamoDB
+            main_logger.info("[TRANSCRIBE_AUDIO] Saving transcription to DynamoDB")
             transcript_id = await save_transcript_to_dynamodb(
                 transcription_result,
                 None,  # No audio info needed for this endpoint
@@ -6092,7 +6136,7 @@ async def transcribe_audio(
             
             if not transcript_id:
                 transcription_status = "failed"
-                error_msg = "Failed to save transcription to DynamoDB"
+                error_msg = "[TRANSCRIBE_AUDIO] Failed to save transcription to DynamoDB"
                 error_logger.error(error_msg)
                 return JSONResponse({
                     "status": "failed",
@@ -6112,7 +6156,7 @@ async def transcribe_audio(
             return JSONResponse(response_data)
 
         except Exception as e:
-            error_msg = f"Error during processing: {str(e)}"
+            error_msg = f"[TRANSCRIBE_AUDIO] Transcription failed: {str(e)}"
             error_logger.exception(error_msg)
             
             # Update status in DynamoDB if we have ID
@@ -6131,7 +6175,7 @@ async def transcribe_audio(
             }, status_code=500)
 
     except Exception as e:
-        error_msg = f"Unexpected error in transcribe_audio: {str(e)}"
+        error_msg = f"[TRANSCRIBE_AUDIO] Unexpected server error: {str(e)}"
         error_logger.exception(error_msg)
         return JSONResponse({
             "status": "failed",
@@ -6158,26 +6202,33 @@ async def search_data(
     """
     try:
         if summary_id:
+            main_logger.info(f"[SEARCH] Looking for summary_id: {summary_id}")
             table = dynamodb.Table('summaries')
             response = table.get_item(Key={"id": summary_id})
             if 'Item' in response:
                 item = response['Item']
                 decrypted_summary = decrypt_data(item['summary'])
                 item['summary'] = decrypted_summary
+                main_logger.info(f"[SEARCH] Summary found and decrypted | summary_id: {summary_id}")
                 return {"summary": item}
             else:
-                return JSONResponse({"error": f"Summary ID {summary_id} not found"}, status_code=404)
-        
+                msg = f"Summary ID {summary_id} not found"
+                main_logger.warning(f"[SEARCH] {msg}")
+                return JSONResponse({"error": msg}, status_code=404)
+            
         if transcript_id:
-            # Get the transcription data
+            main_logger.info(f"[SEARCH] Looking for transcript_id: {transcript_id}")
             transcripts_table = dynamodb.Table('transcripts')
             transcript_response = transcripts_table.get_item(Key={"id": transcript_id})
             if 'Item' not in transcript_response:
-                return JSONResponse({"error": f"Transcript ID {transcript_id} not found"}, status_code=404)
+                msg = f"Transcript ID {transcript_id} not found"
+                main_logger.warning(f"[SEARCH] {msg}")
+                return JSONResponse({"error": msg}, status_code=404)
             
             transcription = transcript_response['Item']
             decrypted_transcription = decrypt_data(transcription['transcript'])
             transcription['transcript'] = decrypted_transcription
+            main_logger.info(f"[SEARCH] Transcript found and decrypted | transcript_id: {transcript_id}")
 
             # Get all reports associated with this transcription (PAGINATED)
             reports_table = dynamodb.Table('reports')
@@ -6186,6 +6237,8 @@ async def search_data(
                 reports_table,
                 FilterExpression=Attr('transcript_id').eq(transcript_id)
             )
+            main_logger.info(f"[SEARCH] Found {len(reports)} reports for transcript_id: {transcript_id}")
+
             
             # Add report IDs to the transcription data
             transcription['report_ids'] = [report['id'] for report in reports]
@@ -6195,22 +6248,27 @@ async def search_data(
             return {"transcription": transcription, "reports": reports}
         
         if report_id:
+            main_logger.info(f"[SEARCH] Looking for report_id: {report_id}")
             table = dynamodb.Table('reports')
             response = table.get_item(Key={"id": report_id})
             if 'Item' in response:
                 item = response['Item']
                 if 'gpt_response' in item:
                     item['gpt_response'] = decrypt_data(item['gpt_response'])
+                main_logger.info(f"[SEARCH] Report found and decrypted | report_id: {report_id}")
                 return {"report": item}
             else:
-                return JSONResponse({"error": f"Report ID {report_id} not found"}, status_code=404)
-        
+                msg = f"Report ID {report_id} not found"
+                main_logger.warning(f"[SEARCH] {msg}")
+                return JSONResponse({"error": msg}, status_code=404)
+
+        main_logger.warning("[SEARCH] No valid ID provided in query")
         return JSONResponse({"error": "No valid ID provided"}, status_code=400)
     
     except Exception as e:
-        error_logger.error(f"Error searching data: {str(e)}", exc_info=True)
+        error_logger.error(f"[SEARCH] Unexpected error: {str(e)}", exc_info=True)
         return JSONResponse({"error": f"Failed to search data: {str(e)}"}, status_code=500)
-
+    
 @app.post("/generate-custom-report")
 @log_execution_time
 async def generate_custom_report(
@@ -6231,35 +6289,38 @@ async def generate_custom_report(
     """
     try:
         # Log incoming request details
+        api_logger.info(f"POST /generate-custom-report | Transcript ID: {transcript_id} | Template Type: {template_type}")
         main_logger.info(f"Received custom report request - Transcript ID: {transcript_id}, Template Type: {template_type}")
 
         # Parse and validate custom template
         try:
             template_schema = custom_template
-            main_logger.info("Custom template taken successfully")
+            main_logger.info("Custom template received and parsed successfully.")
         except json.JSONDecodeError as e:
             error_msg = f"Invalid JSON format for custom template: {str(e)}"
             error_logger.error(error_msg)
             return JSONResponse({"error": error_msg}, status_code=400)
 
         # Retrieve transcript data
+        db_logger.info(f"Fetching transcript from DynamoDB for ID: {transcript_id}")
         table = dynamodb.Table('transcripts')
         response = table.get_item(Key={"id": transcript_id})
 
         if 'Item' not in response:
-            return JSONResponse(
-                {"error": f"Transcript ID {transcript_id} not found"},
-                status_code=404
-            )
+            error_msg = f"Transcript ID {transcript_id} not found in DynamoDB."
+            error_logger.error(error_msg)
+            return JSONResponse({"error": error_msg}, status_code=404)
 
         transcript_item = response['Item']
+        db_logger.info(f"Transcript data successfully retrieved for ID: {transcript_id}")
 
         # Decrypt and parse transcript data
         try:
             decrypted_transcript = decrypt_data(transcript_item.get('transcript', '{}'))
             transcription = json.loads(decrypted_transcript)
+            main_logger.info("Transcript decrypted and parsed successfully.")
         except Exception as e:
-            error_msg = f"Invalid transcript data format: {str(e)}"
+            error_msg = f"Transcript decryption or parsing failed: {str(e)}"
             error_logger.error(error_msg)
             return JSONResponse(
                 {"error": error_msg},
@@ -6267,14 +6328,18 @@ async def generate_custom_report(
             )
 
         # Generate report using the custom template
+        main_logger.info("Generating report using transcription and custom template.")
+        start_time = time.time()
         formatted_report = await generate_report_from_transcription(transcription, template_schema, user_prompt)
+        duration = time.time() - start_time
+        time_logger.info(f"Report generation duration: {duration:.2f} seconds.")
+        
         if isinstance(formatted_report, str) and formatted_report.startswith("Error"):
+            error_logger.error(f"Report generation returned error: {formatted_report}")
             return JSONResponse({"error": formatted_report}, status_code=400)
 
         # Add template_type as the main heading
         formatted_report = f"# {template_type}\n\n{formatted_report}"
-
-        # Generate a unique report_id
         report_id = str(uuid.uuid4())
 
         # Prepare the report item for DynamoDB
@@ -6290,11 +6355,11 @@ async def generate_custom_report(
             "formatted_report": formatted_report  # <-- Top-level field, not nested
         }
 
-        # Store the report in DynamoDB (table: 'reports')
+        db_logger.info(f"Saving generated report to DynamoDB. Report ID: {report_id}")
         report_table = dynamodb.Table('reports')
         report_table.put_item(Item=report_item)
 
-        # Return the response in the required format
+        main_logger.info(f"Custom report successfully generated and stored. Report ID: {report_id}")
         return JSONResponse({
             "report_id": report_id,
             "template_type": template_type,
@@ -6318,6 +6383,8 @@ async def generate_report_from_transcription(transcription, template_schema, use
         Formatted report as a string or an error message.
     """
     try:
+        main_logger.info("Starting report formatting process with custom template.")
+        
         # Prepare the system prompt
         system_prompt = """
         You are a clinical documentation specialist AI trained to convert physician-patient conversations into structured, professional medical reports. 
@@ -6452,14 +6519,19 @@ async def generate_report_from_transcription(transcription, template_schema, use
                 speaker = entry.get("speaker", "Unknown")
                 text = entry.get("text", "")
                 conversation_text += f"{speaker}: {text}\n\n"
+        
+        main_logger.info("Formatted transcription into conversation text.")
+        api_logger.info("Calling language model for report generation.")
 
-        # Generate the report using a language model API
+        start = time.time()
         report = await generate_report_with_language_model(conversation_text, template_schema, system_prompt, user_message)
+        elapsed = time.time() - start
+        time_logger.info(f"Language model processing completed in {elapsed:.2f} seconds.")
 
         return report
 
     except Exception as e:
-        error_msg = f"Error generating report: {str(e)}"
+        error_msg = f"Exception in generate_report_from_transcription: {str(e)}"
         error_logger.error(error_msg, exc_info=True)
         return f"Error: {error_msg}"
 
@@ -6476,7 +6548,7 @@ async def generate_report_with_language_model(conversation_text, template_schema
         A generated report as a string.
     """
     try:
-       
+        api_logger.info("Sending prompt to OpenAI language model.")
         # Use the global client with API key
         global client
         response = client.chat.completions.create(
@@ -6490,10 +6562,11 @@ async def generate_report_with_language_model(conversation_text, template_schema
         
         # Extract the generated report from the response
         report = response.choices[0].message.content.strip()
+        main_logger.info("Language model returned a response successfully.")
         return report
 
     except Exception as e:
-        error_msg = f"Error calling language model API: {str(e)}"
+        error_msg = f"OpenAI API call failed: {str(e)}"
         error_logger.error(error_msg, exc_info=True)
         return f"Error: {error_msg}"
 
@@ -6502,18 +6575,34 @@ async def dynamodb_scan_all(table, **kwargs):
     """
     Scan a DynamoDB table and return all items, paginating as needed.
     """
-    items = []
-    last_evaluated_key = None
+    try:
+        main_logger.info(f"Initiating full scan on DynamoDB table: {table.name}")
+        items = []
+        last_evaluated_key = None
+        scan_count = 0
 
-    while True:
-        if last_evaluated_key:
-            kwargs['ExclusiveStartKey'] = last_evaluated_key
-        response = table.scan(**kwargs)
-        items.extend(response.get('Items', []))
-        last_evaluated_key = response.get('LastEvaluatedKey')
-        if not last_evaluated_key:
-            break
-    return items
+        while True:
+            scan_count += 1
+            if last_evaluated_key:
+                kwargs['ExclusiveStartKey'] = last_evaluated_key
+                main_logger.info(f"Continuing scan with ExclusiveStartKey: {last_evaluated_key}")
+
+            response = table.scan(**kwargs)
+            page_items = response.get('Items', [])
+            items.extend(page_items)
+
+            main_logger.info(f"Scan iteration {scan_count}: Retrieved {len(page_items)} items (Total: {len(items)})")
+
+            last_evaluated_key = response.get('LastEvaluatedKey')
+            if not last_evaluated_key:
+                break
+
+        main_logger.info(f"Completed full scan on table {table.name}. Total items: {len(items)}")
+        return items
+
+    except Exception as e:
+        error_logger.exception(f"Error scanning DynamoDB table {table.name}: {str(e)}")
+        return []
 
 
 @app.post("/transcribe-and-generate-report")
@@ -6637,17 +6726,24 @@ async def transcribe_and_generate_report(
 @log_execution_time
 async def update_report(report_id: str, formatted_report: str = Form(...)):
     try:
+        main_logger.info(f"Received update request for report ID: {report_id}")
+
         report_table = dynamodb.Table('reports')
         response = report_table.get_item(Key={"id": report_id})
         
         if 'Item' not in response:
-            return JSONResponse({"error": f"Report ID {report_id} not found"}, status_code=404)
+            msg = f"Report ID {report_id} not found in 'reports' table"
+            main_logger.warning(msg)
+            return JSONResponse({"error": msg}, status_code=404)
             
         update_expression = "SET formatted_report = :r, updated_at = :t"
         expression_values = {
             ":r": formatted_report,
             ":t": datetime.utcnow().isoformat()
         }
+
+        main_logger.info(f"Updating report ID {report_id} with new formatted report.")
+        db_logger.info(f"UpdateExpression: {update_expression}, Values: {expression_values}")
         
         report_table.update_item(
             Key={"id": report_id},
@@ -6659,6 +6755,7 @@ async def update_report(report_id: str, formatted_report: str = Form(...)):
         updated_response = report_table.get_item(Key={"id": report_id})
         updated_report = updated_response['Item']
         
+        main_logger.info(f"Successfully updated report ID {report_id}")
         return JSONResponse({
             "status": "success",
             "report_id": report_id,
@@ -7988,7 +8085,6 @@ async def format_detailed_soap_note(gpt_response):
     except Exception as e:
         logging.error(f"Error formatting detailed SOAP note: {str(e)}", exc_info=True)
         return f"Error formatting detailed SOAP note: {str(e)}"
-
 
 async def format_followup_note(gpt_response):
     """
@@ -12305,7 +12401,270 @@ valid_templates = [
 @app.get("/valid-templates")
 def get_valid_templates():
     return JSONResponse(content={"templates": valid_templates})
-     
+
+
+
+############### STRESS TEST ################
+
+TEMPLATES = [
+    "new_soap_note", "cardiology_consult", "echocardiography_report_vet", "cardio_consult",
+    "cardio_patient_explainer", "coronary_angiograph_report", "left_heart_catheterization",
+    "right_and_left_heart_study", "toe_guided_cardioversion_report", "hospitalist_progress_note",
+    "multiple_issues_visit", "counseling_consultation", "gp_consult_note",
+    "detailed_dietician_initial_assessment", "referral_letter", "consult_note",
+    "mental_health_appointment", "clinical_report", "psychology_session_notes",
+    "speech_pathology_note", "progress_note", "meeting_minutes", "followup_note",
+    "detailed_soap_note", "case_formulation", "discharge_summary", "h75",
+    "cardiology_letter", "soap_issues", "summary", "physio_soap_outpatient"
+]
+
+TRANSCRIBE_URL = "http://build.medtalk.co/transcribe-audio"
+LIVE_REPORTING_URL = "https://build.medtalk.co/live_reporting"
+
+# Setup stress log directory and response storage
+STRESS_LOG_DIR = "stress_logs"
+STRESS_RESP_DIR = f"{STRESS_LOG_DIR}/responses/reports"
+os.makedirs(STRESS_RESP_DIR, exist_ok=True)
+os.makedirs(f"{STRESS_LOG_DIR}/responses", exist_ok=True)
+
+def setup_logger(name, log_file, level=logging.INFO):
+    format_string = '%(asctime)s - %(levelname)s - %(name)s - %(message)s'
+    log_dir = os.path.dirname(log_file)
+    os.makedirs(log_dir, exist_ok=True)
+
+    handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
+    handler.setFormatter(logging.Formatter(format_string))
+    
+    console = logging.StreamHandler()
+    console.setFormatter(logging.Formatter(format_string))
+    
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.handlers.clear()
+    logger.addHandler(handler)
+    logger.addHandler(console)
+    logger.propagate = False
+    return logger
+
+# Create loggers
+stress_main_logger = setup_logger("stress_main", f"{STRESS_LOG_DIR}/main.log")
+stress_time_logger = setup_logger("stress_time", f"{STRESS_LOG_DIR}/time.log")
+stress_error_logger = setup_logger("stress_error", f"{STRESS_LOG_DIR}/exceptions.log")
+
+
+async def transcribe_and_generate_reports(audio_path: str, session: aiohttp.ClientSession, index: int):
+    try:
+        with open(audio_path, "rb") as f:
+            audio_data = f.read()
+
+        start = time.time()
+        form = aiohttp.FormData()
+        form.add_field("audio", audio_data, filename="audio.wav", content_type="audio/wav")
+
+        async with session.post(TRANSCRIBE_URL, data=form) as resp:
+            transcription_result = await resp.json()
+            elapsed = time.time() - start
+
+            if resp.status != 200 or not transcription_result.get("transcript_id"):
+                stress_error_logger.error(f"Transcription failed (#{index}): {transcription_result}")
+                return
+
+            transcript_id = transcription_result["transcript_id"]
+            stress_main_logger.info(f"[{index}] Transcription completed: {transcript_id}")
+            stress_time_logger.info(f"[{index}] Transcription took {elapsed:.2f}s")
+
+            # Save transcription response
+            with open(f"{STRESS_LOG_DIR}/responses/transcription_{transcript_id}.json", "w") as f:
+                json.dump(transcription_result, f, indent=2)
+
+    except Exception as e:
+        stress_error_logger.exception(f"Transcription exception (#{index}): {e}")
+        return
+
+    # Generate reports
+    try:
+        report_start = time.time()
+        for template in TEMPLATES:
+            form = aiohttp.FormData()
+            form.add_field("transcript_id", transcript_id)
+            form.add_field("template_type", template)
+
+            try:
+                async with session.post(LIVE_REPORTING_URL, data=form) as response:
+                    raw_text = await response.text()
+                    if "---meta:::" in raw_text and ":::meta---" in raw_text:
+                        meta_block = raw_text.split(":::meta---")[0].replace("---meta:::", "").strip()
+                        markdown_block = raw_text.split(":::meta---")[1].strip()
+                        report_json = {
+                            "template_type": template,
+                            "metadata": json.loads(meta_block),
+                            "report_markdown": markdown_block
+                        }
+                    else:
+                        report_json = {"template_type": template, "error": "Malformed response", "raw": raw_text}
+
+                    with open(f"{STRESS_RESP_DIR}/{transcript_id}_{template}.json", "w") as rf:
+                        json.dump(report_json, rf, indent=2)
+
+                    stress_main_logger.info(f"Report: {template} for {transcript_id} (Status {response.status})")
+
+            except Exception as e:
+                stress_error_logger.error(f"Error in report {template} for {transcript_id}: {e}")
+
+        report_elapsed = time.time() - report_start
+        stress_time_logger.info(f"[{index}] All reports took {report_elapsed:.2f}s")
+
+    except Exception as e:
+        stress_error_logger.exception(f"Report generation failed for {transcript_id}: {e}")
+
+
+async def run_stress_test_serial(audio_paths: List[str]):
+    stress_main_logger.info("Starting stress test (serial)...")
+    async with aiohttp.ClientSession() as session:
+        for i in range(50):
+            audio_path = audio_paths[i % len(audio_paths)]
+            stress_main_logger.info(f"Running test #{i+1} on audio: {os.path.basename(audio_path)}")
+            await transcribe_and_generate_reports(audio_path, session, i + 1)
+    stress_main_logger.info("🏁 Stress test completed.")
+
+
+@app.post("/stress-test")
+async def stress_test_endpoint(background_tasks: BackgroundTasks, audios: List[UploadFile] = File(...)):
+    temp_paths = []
+    for audio in audios:
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        with open(temp_file.name, "wb") as f:
+            f.write(await audio.read())
+        temp_paths.append(temp_file.name)
+
+    background_tasks.add_task(run_stress_test_serial, temp_paths)
+    return {
+        "status": f"Stress test started with {len(temp_paths)} uploaded audio files.",
+        "logs_dir": STRESS_LOG_DIR,
+        "responses_dir": f"{STRESS_LOG_DIR}/responses"
+    }
+
+
+
+@app.post("/stress-test2")
+async def stress_test_endpoint_2(background_tasks: BackgroundTasks, audios: List[UploadFile] = File(...)):
+    temp_paths = []
+    for audio in audios:
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        with open(temp_file.name, "wb") as f:
+            f.write(await audio.read())
+        temp_paths.append(temp_file.name)
+
+    background_tasks.add_task(run_stress_test_serial, temp_paths)
+    return {
+        "status": f"Stress test started with {len(temp_paths)} uploaded audio files.",
+        "logs_dir": STRESS_LOG_DIR,
+        "responses_dir": f"{STRESS_LOG_DIR}/responses"
+    }
+
+
+@app.post("/stress-test3")
+async def stress_test_endpoint_3(background_tasks: BackgroundTasks, audios: List[UploadFile] = File(...)):
+    temp_paths = []
+    for audio in audios:
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        with open(temp_file.name, "wb") as f:
+            f.write(await audio.read())
+        temp_paths.append(temp_file.name)
+
+    background_tasks.add_task(run_stress_test_serial, temp_paths)
+    return {
+        "status": f"Stress test started with {len(temp_paths)} uploaded audio files.",
+        "logs_dir": STRESS_LOG_DIR,
+        "responses_dir": f"{STRESS_LOG_DIR}/responses"
+    }
+
+@app.get("/stress-test/report-response", response_class=JSONResponse)
+def get_report_response(
+    transcript_id: str = Query(..., description="Transcript ID to retrieve"),
+    template: str = Query(..., description="Template name (e.g. new_soap_note)")
+):
+    report_path = Path(f"{STRESS_RESP_DIR}/{transcript_id}_{template}.json")
+    main_logger.info(f"Fetching report for transcript_id: {transcript_id}, template: {template}")
+    if not report_path.exists():
+        error_logger.warning(f"Report not found at {report_path}")
+        raise HTTPException(status_code=404, detail=f"Report not found for ID: {transcript_id} and template: {template}")
+
+    try:
+        with open(report_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        main_logger.info(f"Successfully loaded report file: {report_path}")
+        return data
+    except Exception as e:
+        error_logger.exception(f"Error reading report file: {report_path}")
+        raise HTTPException(status_code=500, detail="Failed to read report file.")
+
+@app.get("/logs/filter", response_class=PlainTextResponse)
+def get_filtered_logs(
+    main: bool = Query(False),
+    time: bool = Query(False),
+    error: bool = Query(False),
+    api: bool = Query(False),
+    db: bool = Query(False)
+):
+    log_map = {
+        "main": ("main", "logging/main.log"),
+        "time": ("time", "logging/time.log"),
+        "error": ("error", "logging/exceptions.log"),
+        "api": ("api", "logging/api.log"),
+        "db": ("db", "logging/database.log")
+    }
+
+    selected_logs = []
+    for key, (name, path) in log_map.items():
+        if locals()[key]:
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    selected_logs.append(f"\n\n===== {name.upper()} LOG =====\n{f.read()}")
+                    main_logger.info(f"Fetched log: {path}")
+            else:
+                warning_msg = f"File not found: {path}"
+                selected_logs.append(f"\n\n===== {name.upper()} LOG =====\n File not found: {path}")
+                error_logger.warning(warning_msg)
+
+    if not selected_logs:
+        msg = "No logs selected. Use query params like `?main=true&error=true`"
+        main_logger.warning(msg)
+        return PlainTextResponse(msg, status_code=400)
+
+    return PlainTextResponse("".join(selected_logs))
+
+@app.get("/stress-test/logs", response_class=PlainTextResponse)
+def get_stress_logs(
+    main: bool = Query(False),
+    time: bool = Query(False),
+    error: bool = Query(False)
+):
+    log_map = {
+        "main": "stress_logs/main.log",
+        "time": "stress_logs/time.log",
+        "error": "stress_logs/exceptions.log"
+    }
+
+    selected = []
+    for name, path in log_map.items():
+        if locals()[name]:
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    selected.append(f"\n\n===== {name.upper()} LOG =====\n{f.read()}")
+                    main_logger.info(f"Accessed stress log: {path}")
+            else:
+                warning_msg = f"File not found: {path}"
+                selected.append(f"\n\n===== {name.upper()} LOG =====\n File not found: {path}")
+                error_logger.warning(warning_msg)
+
+    if not selected:
+        msg = "No logs selected. Use query params like `?main=true&error=true`"
+        main_logger.warning(msg)
+        return PlainTextResponse(msg, status_code=400)
+    
+    return PlainTextResponse("".join(selected))
+
 # ... (Previous code remains unchanged up to the WebSocket endpoint definition)
 @app.websocket("/ws/transcribe-and-generate-report")
 @log_execution_time
