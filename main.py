@@ -308,11 +308,10 @@ async def root():
     return {"message": "Welcome to the speech transcription and GPT-4 processing service!"}
 
 
-# Update WebSocket endpoint to focus just on live transcription without template generation
 @app.websocket("/ws/live-transcription")
 async def live_transcription_endpoint(websocket: WebSocket):
     client_id = str(uuid.uuid4())
-    transcript_id = str(uuid.uuid4())  # Generate transcript ID early
+    transcript_id = str(uuid.uuid4())
 
     main_logger.info(f"[{client_id}] New WebSocket connection")
     time_logger.info(f"[{client_id}] Client: {websocket.client.host}:{websocket.client.port}")
@@ -322,22 +321,19 @@ async def live_transcription_endpoint(websocket: WebSocket):
         main_logger.info(f"[{client_id}] Connected successfully")
 
         config_msg = await websocket.receive_text()
-        try:
-            config = json.loads(config_msg)
-            main_logger.info(f"[{client_id}] Config received: {config}")
-        except json.JSONDecodeError as e:
-            error_logger.error(f"[{client_id}] JSON decode error: {e}")
-            raise
+        config = json.loads(config_msg)
+        main_logger.info(f"[{client_id}] Config received: {config}")
 
         await websocket.send_text(json.dumps({
             "status": "ready",
             "message": "Ready to receive audio for real-time transcription",
             "transcript_id": transcript_id
         }))
-        main_logger.info(f"[{client_id}] Sent ready with transcript_id: {transcript_id}")
 
         session_data = manager.get_session_data(client_id)
         session_data["transcript_id"] = transcript_id
+        session_data["no_report"] = False
+        session_data["closed"] = False
         manager.update_session_data(client_id, session_data)
 
         audio_buffer = bytearray()
@@ -353,80 +349,63 @@ async def live_transcription_endpoint(websocket: WebSocket):
             deepgram_url,
             additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
         )
-        main_logger.info(f"[{client_id}] Connected to Deepgram")
-
-        
-        audio_task = asyncio.create_task(process_audio_stream(websocket, deepgram_socket, audio_buffer))
+        audio_task = asyncio.create_task(process_audio_stream(websocket, deepgram_socket, audio_buffer, client_id))
         transcript_task = asyncio.create_task(process_transcription_results(deepgram_socket, websocket, client_id))
 
         done, pending = await asyncio.wait(
             [audio_task, transcript_task],
-            return_when=asyncio.FIRST_EXCEPTION  # or FIRST_COMPLETED
+            return_when=asyncio.FIRST_EXCEPTION
         )
 
         for task in pending:
             task.cancel()
 
-
         audio_info = await save_audio_to_s3(bytes(audio_buffer))
-        if audio_info:
-            main_logger.info(f"[{client_id}] Audio saved: {audio_info}")
-        else:
-            error_logger.error(f"[{client_id}] Audio saving failed")
+        transcript_data = manager.get_session_data(client_id).get("transcription", {
+            "conversation": [], "metadata": {"duration": 0, "channels": 1}
+        })
 
-        # Fetch session data and transcription
-        session_data = manager.get_session_data(client_id)
-        transcript_data = session_data.get("transcription")
-
-        # Ensure fallback if transcription is missing or empty
-        if not transcript_data:
-            transcript_data = {
-                "conversation": [],
-                "metadata": {
-                    "duration": 0,
-                    "channels": 1
-                }
-            }
-
-        # Save transcript
         await save_transcript_to_dynamodb(transcript_data, audio_info, status="completed", transcript_id=transcript_id)
-        main_logger.info(f"[{client_id}] Transcript saved: {transcript_id}")
 
-        # Prepare the final response with `status`
         response_payload = {
             "status": "transcription_saved",
             "transcript_id": transcript_id,
-            "transcription": {
-                "id": transcript_id,
-                "transcript": transcript_data,
-            },
+            "transcription": {"id": transcript_id, "transcript": transcript_data},
             "reports": []
         }
-        # Send it
+
         if websocket.client_state.name != "DISCONNECTED":
             try:
                 await websocket.send_text(json.dumps(response_payload))
-                await websocket.close()
-                main_logger.info(f"[{client_id}] WebSocket closed after final response")
-            except RuntimeError as e:
-                error_logger.warning(f"[{client_id}] Cannot send final response (WebSocket likely closed): {str(e)}")
-        else:
-            error_logger.warning(f"[{client_id}] Final response not sent: WebSocket already disconnected")
-
-
+            except RuntimeError:
+                error_logger.warning(f"[{client_id}] Could not send final response")
 
     except WebSocketDisconnect:
         main_logger.warning(f"[{client_id}] WebSocket disconnected")
     except Exception as e:
         error_logger.error(f"[{client_id}] Unexpected error: {str(e)}\n{traceback.format_exc()}")
     finally:
-        manager.disconnect(client_id)
-        main_logger.info(f"[{client_id}] Cleaned up connection")
+        try:
+            session_data = manager.get_session_data(client_id)
+            manager.disconnect(client_id)
+            main_logger.info(f"[{client_id}] Cleaned up connection")
+            if session_data and session_data.get("closed") and not session_data.get("no_report", False):
+                transcript_id = session_data.get("transcript_id")
+                template_type = session_data.get("template_type", "new_soap_note")
+                async with aiohttp.ClientSession() as session:
+                    form = aiohttp.FormData()
+                    form.add_field("transcript_id", transcript_id)
+                    form.add_field("template_type", template_type)
+                    await session.post("https://build.medtalk.co/generate_report_session", data=form)
+                    main_logger.info(f"[{client_id}] Background report generation triggered")
+            else:
+                main_logger.info(f"[{client_id}] Skipping report generation (no_report={session_data.get('no_report')})")
+        except Exception as e:
+            error_logger.error(f"[{client_id}] Cleanup or background report failed: {e}")
 
-async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buffer=None):
+
+async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buffer, client_id):
     try:
-        client_id = websocket.client.host  # Or pass as parameter
-
         while True:
             try:
                 message = await websocket.receive()
@@ -438,33 +417,32 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
                 data = message["bytes"]
 
                 session_data = manager.get_session_data(client_id)
-                is_paused = session_data.get("paused", False)
-
-                if is_paused:
-                    main_logger.info(f"[{client_id}] Audio stream paused. Skipping audio chunk.")
+                if session_data.get("paused", False):
                     continue
 
-                # Buffer and forward audio
                 audio_buffer.extend(data)
-                try:
-                    await deepgram_socket.send(data)
-                except Exception as e:
-                    error_logger.error(f"[{client_id}] Failed to send audio to Deepgram: {e}")
-                    break
+                await deepgram_socket.send(data)
 
             elif "text" in message:
                 try:
                     data = json.loads(message["text"])
                     msg_type = data.get("type")
+                    session_data = manager.get_session_data(client_id)
 
                     if msg_type == "CloseStream":
+                        session_data["closed"] = True
+                        session_data["template_type"] = data.get("template_type", "new_soap_note")
+                        manager.update_session_data(client_id, session_data)
                         await deepgram_socket.send(json.dumps(data))
-                        main_logger.info(f"[{client_id}] Received CloseStream signal. Ending audio stream.")
+                        continue
+
+                    elif msg_type == "dont-generate-report":
+                        session_data["no_report"] = True
+                        manager.update_session_data(client_id, session_data)
+                        await websocket.close()
                         break
 
                     elif msg_type == "PauseStream":
-                        main_logger.info(f"[{client_id}] Pausing audio stream.")
-                        session_data = manager.get_session_data(client_id)
                         session_data["paused"] = True
                         if "transcription" in session_data:
                             session_data["transcription"]["conversation"].append({
@@ -475,8 +453,6 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
                         manager.update_session_data(client_id, session_data)
 
                     elif msg_type == "ResumeStream":
-                        main_logger.info(f"[{client_id}] Resuming audio stream.")
-                        session_data = manager.get_session_data(client_id)
                         session_data["paused"] = False
                         if "transcription" in session_data:
                             session_data["transcription"]["conversation"].append({
@@ -486,9 +462,6 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
                             })
                         manager.update_session_data(client_id, session_data)
 
-                    else:
-                        main_logger.debug(f"[{client_id}] Unknown message type received: {msg_type}")
-
                 except json.JSONDecodeError:
                     error_logger.warning(f"[{client_id}] Received non-JSON text message, ignoring.")
 
@@ -497,72 +470,55 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
     except Exception as e:
         error_logger.error(f"[{client_id}] Audio stream error: {str(e)}\n{traceback.format_exc()}")
 
+
 async def process_transcription_results(deepgram_socket, websocket, client_id):
     try:
         while True:
             try:
-                main_logger.info(f"[{client_id}]  Waiting for transcription from Deepgram...")
                 response = await deepgram_socket.recv()
-                main_logger.info(f"[{client_id}]  Received response from Deepgram: {response}")
+            except websockets.exceptions.ConnectionClosedOK:
+                main_logger.info(f"[{client_id}] Deepgram WebSocket closed normally (1000 OK)")
+                break
+            except websockets.exceptions.ConnectionClosedError as e:
+                error_logger.error(f"[{client_id}] Deepgram connection closed with error: {e}")
+                break
 
-                if isinstance(response, str):
-                    data = json.loads(response)
+            data = json.loads(response)
 
-                    if "channel" in data and "alternatives" in data["channel"]:
-                        transcript = data["channel"]["alternatives"][0]
-                        is_final = data.get("is_final", False)
+            if "channel" in data and "alternatives" in data["channel"]:
+                transcript = data["channel"]["alternatives"][0]
+                is_final = data.get("is_final", False)
 
-                        speaker = "Speaker 1"
-                        if "words" in transcript and transcript["words"]:
-                            if "speaker" in transcript["words"][0]:
-                                speaker = f"Speaker {transcript['words'][0]['speaker']}"
+                speaker = "Speaker 1"
+                if transcript.get("words") and "speaker" in transcript["words"][0]:
+                    speaker = f"Speaker {transcript['words'][0]['speaker']}"
 
-                        message = {
-                            "type": "transcript",
-                            "text": transcript["transcript"],
+                message = {
+                    "type": "transcript",
+                    "text": transcript["transcript"],
+                    "speaker": speaker,
+                    "is_final": is_final
+                }
+
+                try:
+                    await websocket.send_text(json.dumps(message))
+                except RuntimeError:
+                    break
+
+                if data.get("type") == "Results":
+                    transcript_text = transcript["transcript"].strip()
+                    if transcript_text:
+                        session_data = manager.get_session_data(client_id)
+                        if "transcription" not in session_data:
+                            session_data["transcription"] = {"conversation": []}
+                        session_data["transcription"]["conversation"].append({
                             "speaker": speaker,
+                            "text": transcript_text,
                             "is_final": is_final
-                        }
-
-                        main_logger.info(f"[{client_id}]    Sending transcription to client:")
-                        main_logger.info(f"[{client_id}]    Speaker: {speaker}")
-                        main_logger.info(f"[{client_id}]    Text: {transcript['transcript']}")
-                        main_logger.info(f"[{client_id}]    Is Final: {is_final}")
-
-                        try:
-                            await websocket.send_text(json.dumps(message))
-                            main_logger.info(f"[{client_id}] Transcription sent to client")
-                        except RuntimeError:
-                            error_logger.warning(f"[{client_id}] Could not send transcription (WebSocket likely closed)")
-
-                        if data.get("type") == "Results":
-                            transcript_text = transcript["transcript"]
-                            words = transcript.get("words", [])
-                            speaker = f"Speaker {words[0]['speaker']}" if words and 'speaker' in words[0] else "Speaker 0"
-
-                            session_data = manager.get_session_data(client_id)
-                            if "transcription" not in session_data:
-                                session_data["transcription"] = {"conversation": []}
-                            if transcript_text.strip():
-                                session_data["transcription"]["conversation"].append({
-                                    "speaker": speaker,
-                                    "text": transcript_text,
-                                    "is_final": is_final
-                                })
-                            manager.update_session_data(client_id, session_data)
-
-            except websockets.exceptions.ConnectionClosed:
-                main_logger.warning(f"[{client_id}] Deepgram connection closed")
-                break
-            except Exception as e:
-                error_logger.error(f"[{client_id}] Error processing Deepgram response: {str(e)}")
-                error_logger.error(f"Error details: {traceback.format_exc()}")
-                break
+                        })
+                        manager.update_session_data(client_id, session_data)
     except Exception as e:
-        error_logger.error(f"[{client_id}] Error in process_transcription_results: {str(e)}")
-        error_logger.error(f"Error details: {traceback.format_exc()}")
-        raise
-
+        error_logger.error(f"[{client_id}] Error in process_transcription_results: {e}\n{traceback.format_exc()}")
 
 # New audio processing functions
 def split_audio(audio_data: bytes, chunk_size_seconds: int = 60, target_format: str = "wav", target_sample_rate: int = 16000) -> list[bytes]:
@@ -6049,6 +6005,108 @@ async def live_reports(
             status_code=500
         )
     
+
+@app.post("/generate_report_session")
+@log_execution_time
+async def generate_report_session(
+    transcript_id: str = Form(...),
+    template_type: str = Form("new_soap_note"),
+    background_tasks: BackgroundTasks = None
+):
+    """
+    Generate a full report in one go (no streaming) and save it in the background.
+
+    Args:
+        transcript_id: ID of the transcript in DynamoDB
+        template_type: Template to use for generating report
+        background_tasks: For background save task
+
+    Returns:
+        JSONResponse with full report and metadata
+    """
+    try:
+        main_logger.info(f"[GENERATE_REPORT_SESSION] Request received | transcript_id={transcript_id} | template_type={template_type}")
+        time_logger.info(f"[GENERATE_REPORT_SESSION] Started processing for transcript_id={transcript_id}")
+
+        valid_templates = [
+            "new_soap_note", "cardiology_consult", "echocardiography_report_vet", "cardio_consult",
+            "cardio_patient_explainer", "coronary_angiograph_report", "left_heart_catheterization",
+            "right_and_left_heart_study", "toe_guided_cardioversion_report", "hospitalist_progress_note",
+            "multiple_issues_visit", "counseling_consultation", "gp_consult_note",
+            "detailed_dietician_initial_assessment", "referral_letter", "consult_note",
+            "mental_health_appointment", "clinical_report", "psychology_session_notes",
+            "speech_pathology_note", "progress_note", "meeting_minutes", "followup_note",
+            "detailed_soap_note", "case_formulation", "discharge_summary", "h75",
+            "cardiology_letter", "soap_issues", "summary", "physio_soap_outpatient",
+        ]
+
+        if template_type not in valid_templates:
+            error_msg = f"Invalid template type '{template_type}'. Must be one of: {', '.join(valid_templates)}"
+            error_logger.error(error_msg)
+            return JSONResponse({"status": "failed", "error": error_msg}, status_code=400)
+
+        table = dynamodb.Table('transcripts')
+        response = table.get_item(Key={"id": transcript_id})
+        if 'Item' not in response:
+            error_msg = f"Transcript ID {transcript_id} not found"
+            error_logger.error(error_msg)
+            return JSONResponse({"status": "failed", "error": error_msg}, status_code=404)
+
+        transcript_item = response['Item']
+        transcript_data = transcript_item.get('transcript', '{}')
+        if isinstance(transcript_data, (bytes, boto3.dynamodb.types.Binary)):
+            transcript_data = decrypt_data(transcript_data).decode('utf-8')
+
+        try:
+            transcription = json.loads(transcript_data)
+        except json.JSONDecodeError:
+            error_msg = "Invalid transcript data format"
+            error_logger.error(error_msg)
+            return JSONResponse({"status": "failed", "error": error_msg}, status_code=400)
+
+        report_id = str(uuid.uuid4())
+        main_logger.info(f"[GENERATE_REPORT_SESSION] Generating report_id={report_id} for transcript_id={transcript_id}")
+
+        gpt_response = ""
+        try:
+            async for chunk in stream_openai_report(transcription, template_type):
+                gpt_response += chunk
+        except Exception as e:
+            error_msg = f"[GENERATE_REPORT_SESSION] Report generation failed: {str(e)}"
+            error_logger.exception(error_msg)
+            gpt_response = f"Error: {str(e)}"
+
+        status = "completed" if not gpt_response.startswith("Error:") else "failed"
+
+        background_tasks.add_task(
+            save_report_background,
+            transcript_id,
+            gpt_response,
+            template_type,
+            status,
+            report_id
+        )
+
+        return JSONResponse({
+            "status": status,
+            "report_id": report_id,
+            "template_type": template_type,
+            "report": gpt_response,
+            "transcript_id": transcript_id,
+        }, status_code=200 if status == "completed" else 500)
+
+    except Exception as e:
+        error_msg = f"[GENERATE_REPORT] Unexpected error: {str(e)}"
+        error_logger.exception(error_msg)
+        return JSONResponse(
+            {
+                "status": "failed",
+                "error": error_msg,
+                "transcript_id": transcript_id
+            },
+            status_code=500
+        )
+
 @app.post("/transcribe-audio")
 @log_execution_time
 async def transcribe_audio(
@@ -12363,47 +12421,47 @@ async def generate_template_report(
             "report_status": "failed"
         }, status_code=500)
 
-
-valid_templates = [
-    "new_soap_note",
-    "cardiology_consult",
-    "echocardiography_report_vet",
-    "cardio_consult",
-    "cardio_patient_explainer",
-    "coronary_angiograph_report",
-    "left_heart_catheterization",
-    "right_and_left_heart_study",
-    "toe_guided_cardioversion_report",
-    "hospitalist_progress_note",
-    "multiple_issues_visit",
-    "counseling_consultation",
-    "gp_consult_note",
-    "detailed_dietician_initial_assessment",
-    "referral_letter",
-    "consult_note",
-    "mental_health_appointment",
-    "clinical_report",
-    "psychology_session_notes",
-    "speech_pathology_note",
-    "progress_note",
-    "meeting_minutes",
-    "followup_note",
-    "detailed_soap_note",
-    "case_formulation",
-    "discharge_summary",
-    "h75",
-    "cardiology_letter",
-    "soap_issues",
-    "summary",
-    "physio_soap_outpatient",
-]
-
+template_display_map= {
+    "detailed_soap_note": "SOAP Detailed",
+    "new_soap_note": "S.O.A.P (Default)",
+    "soap_issues": "SOAP Issues",
+    "referral_letter": "Referral Letter",
+    "cardiology_consult": "Cardiology Consult",
+    "echocardiography_report_vet": "Echocardiography Report (Vet)",
+    "cardio_consult": "Cardio Consult",
+    "cardio_patient_explainer": "Cardio Patient Explainer",
+    "coronary_angiograph_report": "Coronary Angiograph Report",
+    "left_heart_catheterization": "Left Heart Catheterization",
+    "right_and_left_heart_study": "Right and Left Heart Study",
+    "toe_guided_cardioversion_report": "TOE Guided Cardioversion Report",
+    "hospitalist_progress_note": "Hospitalist Progress Note",
+    "multiple_issues_visit": "Multiple Issues Visit",
+    "counseling_consultation": "Counseling Consultation",
+    "gp_consult_note": "GP Consult Note",
+    "speech_pathology_note": "Speech Pathology Note",
+    "summary": "Summary",
+    "physio_soap_outpatient": "Physio SOAP Outpatient",
+    "h75": "H75",
+    "consult_note": "Consult Note",
+    "discharge_summary": "Discharge Summary",
+    "clinical_report": "Clinical Report",
+    "mental_health_appointment": "Mental Health Note",
+    "cardiology_letter": "Cardiology Consultation Letter",
+    "psychology_session_notes": "Psychology Session Notes",
+    "pathology_note": "Speech Pathology Therapy",
+    "followup_note": "Follow-up Note",
+    "meeting_minutes": "Meeting Minutes",
+    "case_formulation": "Case Formulation",
+    "progress_note": "Progress Note",
+    "detailed_dietician_initial_assessment": "Detailed Dietician Initial Assessment"
+}
 
 @app.get("/valid-templates")
 def get_valid_templates():
-    return JSONResponse(content={"templates": valid_templates})
-
-
+    return JSONResponse(content={
+        "default": "SOAP Detailed",
+        "templates": template_display_map
+    })
 
 ############### STRESS TEST ################
 
@@ -12419,7 +12477,7 @@ TEMPLATES = [
     "cardiology_letter", "soap_issues", "summary", "physio_soap_outpatient"
 ]
 
-TRANSCRIBE_URL = "http://build.medtalk.co/transcribe-audio"
+TRANSCRIBE_URL = "https://build.medtalk.co/transcribe-audio"
 LIVE_REPORTING_URL = "https://build.medtalk.co/live_reporting"
 
 # Setup stress log directory and response storage
