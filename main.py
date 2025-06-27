@@ -5887,7 +5887,7 @@ async def save_report_background(
         if status == "failed":
             error_logger.info(f"[REPORT-SAVE] Report marked as failed for transcript {transcript_id}")
         else:
-            main_logger.info(f"[REPORT-SAVE] Successfully saved report {saved_report_id} for transcript {transcript_id}")
+            main_logger.info(f"[REPORT-SAVE] Successfully saved report {report_id} for transcript {transcript_id}")
 
     except Exception as e:
         error_msg = f"[REPORT-SAVE] Exception while saving report {report_id}: {str(e)}"
