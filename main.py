@@ -349,36 +349,11 @@ async def live_transcription_endpoint(websocket: WebSocket):
             deepgram_url,
             additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
         )
+
         audio_task = asyncio.create_task(process_audio_stream(websocket, deepgram_socket, audio_buffer, client_id))
-        transcript_task = asyncio.create_task(process_transcription_results(deepgram_socket, websocket, client_id))
+        transcript_task = asyncio.create_task(process_transcription_results(deepgram_socket, websocket, client_id, audio_buffer))
 
-        done, pending = await asyncio.wait(
-            [audio_task, transcript_task],
-            return_when=asyncio.FIRST_EXCEPTION
-        )
-
-        for task in pending:
-            task.cancel()
-
-        audio_info = await save_audio_to_s3(bytes(audio_buffer))
-        transcript_data = manager.get_session_data(client_id).get("transcription", {
-            "conversation": [], "metadata": {"duration": 0, "channels": 1}
-        })
-
-        await save_transcript_to_dynamodb(transcript_data, audio_info, status="completed", transcript_id=transcript_id)
-
-        response_payload = {
-            "status": "transcription_saved",
-            "transcript_id": transcript_id,
-            "transcription": {"id": transcript_id, "transcript": transcript_data},
-            "reports": []
-        }
-
-        if websocket.client_state.name != "DISCONNECTED":
-            try:
-                await websocket.send_text(json.dumps(response_payload))
-            except RuntimeError:
-                error_logger.warning(f"[{client_id}] Could not send final response")
+        await asyncio.gather(audio_task, transcript_task, return_exceptions=True)
 
     except WebSocketDisconnect:
         main_logger.warning(f"[{client_id}] WebSocket disconnected")
@@ -386,23 +361,10 @@ async def live_transcription_endpoint(websocket: WebSocket):
         error_logger.error(f"[{client_id}] Unexpected error: {str(e)}\n{traceback.format_exc()}")
     finally:
         try:
-            session_data = manager.get_session_data(client_id)
             manager.disconnect(client_id)
             main_logger.info(f"[{client_id}] Cleaned up connection")
-            if session_data and session_data.get("closed") and not session_data.get("no_report", False):
-                transcript_id = session_data.get("transcript_id")
-                template_type = session_data.get("template_type", "new_soap_note")
-                async with aiohttp.ClientSession() as session:
-                    form = aiohttp.FormData()
-                    form.add_field("transcript_id", transcript_id)
-                    form.add_field("template_type", template_type)
-                    await session.post("https://build.medtalk.co/generate_report_session", data=form)
-                    main_logger.info(f"[{client_id}] Background report generation triggered")
-            else:
-                main_logger.info(f"[{client_id}] Skipping report generation (no_report={session_data.get('no_report')})")
         except Exception as e:
-            error_logger.error(f"[{client_id}] Cleanup or background report failed: {e}")
-
+            error_logger.error(f"[{client_id}] Cleanup failed: {e}")
 
 async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buffer, client_id):
     try:
@@ -429,18 +391,20 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
                     msg_type = data.get("type")
                     session_data = manager.get_session_data(client_id)
 
-                    if msg_type == "CloseStream":
+                    if msg_type == "dont-generate-report":
+                        session_data["no_report"] = True
+                        manager.update_session_data(client_id, session_data)
+                        main_logger.info(f"[{client_id}] Received dont-generate-report, setting no_report=True and closing WebSocket")
+                        break  # Exit immediately
+
+                    elif msg_type == "CloseStream":
                         session_data["closed"] = True
                         session_data["template_type"] = data.get("template_type", "new_soap_note")
                         manager.update_session_data(client_id, session_data)
+                        main_logger.info(f"[{client_id}] Received CloseStream, marked session closed with template_type={session_data['template_type']}")
+                        
                         await deepgram_socket.send(json.dumps(data))
                         continue
-
-                    elif msg_type == "dont-generate-report":
-                        session_data["no_report"] = True
-                        manager.update_session_data(client_id, session_data)
-                        await websocket.close()
-                        break
 
                     elif msg_type == "PauseStream":
                         session_data["paused"] = True
@@ -471,7 +435,19 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
         error_logger.error(f"[{client_id}] Audio stream error: {str(e)}\n{traceback.format_exc()}")
 
 
-async def process_transcription_results(deepgram_socket, websocket, client_id):
+async def generate_report_background(transcript_id, template_type, client_id):
+    try:
+        main_logger.info(f"[{client_id}] (BG) Generating report for {template_type} with Transcript ID {transcript_id}")
+        async with aiohttp.ClientSession() as session:
+            form = aiohttp.FormData()
+            form.add_field("transcript_id", transcript_id)
+            form.add_field("template_type", template_type)
+            await session.post("https://build.medtalk.co/generate_report_session", data=form)
+            main_logger.info(f"[{client_id}] (BG) Report generation triggered")
+    except Exception as e:
+        error_logger.error(f"[{client_id}] (BG) Report generation error: {e}")
+
+async def process_transcription_results(deepgram_socket, websocket, client_id, audio_buffer):
     try:
         while True:
             try:
@@ -517,6 +493,48 @@ async def process_transcription_results(deepgram_socket, websocket, client_id):
                             "is_final": is_final
                         })
                         manager.update_session_data(client_id, session_data)
+        
+        session_data = manager.get_session_data(client_id)
+        transcript_id = session_data["transcript_id"]
+
+        audio_info = await save_audio_to_s3(bytes(audio_buffer))
+        transcript_data = session_data.get("transcription", {
+            "conversation": [], "metadata": {"duration": 0, "channels": 1}
+        })
+
+        await save_transcript_to_dynamodb(
+            transcript_data,
+            audio_info,
+            status="completed",
+            transcript_id=transcript_id
+        )
+
+        response_payload = {
+            "status": "transcription_saved",
+            "transcript_id": transcript_id,
+            "transcription": {
+                "id": transcript_id,
+                "transcript": transcript_data
+            },
+            "reports": []
+        }
+
+        # Try sending transcription_saved to client
+        try:
+            await websocket.send_text(json.dumps(response_payload))
+            main_logger.info(f"[{client_id}] Sent transcription_saved after Deepgram closed")
+        except Exception as e:
+            error_logger.warning(f"[{client_id}] Failed to send transcription_saved: {e}")
+
+        # Always trigger report if closed and not disabled
+        session_data = manager.get_session_data(client_id)
+        if session_data.get("closed") and not session_data.get("no_report", False):
+            transcript_id = session_data.get("transcript_id")
+            template_type = session_data.get("template_type", "new_soap_note")
+            asyncio.create_task(generate_report_background(transcript_id, template_type, client_id))
+        else:
+            main_logger.info(f"[{client_id}] Skipping report generation (no_report={session_data.get('no_report')})")
+
     except Exception as e:
         error_logger.error(f"[{client_id}] Error in process_transcription_results: {e}\n{traceback.format_exc()}")
 
