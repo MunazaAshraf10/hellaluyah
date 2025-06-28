@@ -408,22 +408,10 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
 
                     elif msg_type == "PauseStream":
                         session_data["paused"] = True
-                        if "transcription" in session_data:
-                            session_data["transcription"]["conversation"].append({
-                                "speaker": "System",
-                                "text": "[Recording Paused]",
-                                "is_final": True
-                            })
                         manager.update_session_data(client_id, session_data)
 
                     elif msg_type == "ResumeStream":
                         session_data["paused"] = False
-                        if "transcription" in session_data:
-                            session_data["transcription"]["conversation"].append({
-                                "speaker": "System",
-                                "text": "[Recording Resumed]",
-                                "is_final": True
-                            })
                         manager.update_session_data(client_id, session_data)
 
                 except json.JSONDecodeError:
@@ -2040,8 +2028,8 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             user_instructions= f"""You are provided with a medical conversation transcript. 
             Analyze the transcript and generate a structured CARDIOLOGY CONSULT NOTE following the specified template. 
             Use only the information explicitly provided in the transcript, and do not include or assume any additional details. 
-            Ensure the output is a valid JSON object with the CARDIOLOGY CONSULT NOTE sections formatted professionally and concisely in a doctor-like tone. 
-            Make sure the output is in valid JSON format. 
+            Ensure the output is a valid Text format with the CARDIOLOGY CONSULT NOTE sections formatted professionally and concisely in a doctor-like tone. 
+            Make sure the output is in valid Text format. 
             If the patient didnt provide the information regarding any section then ignore the respective section.
             Include the all numbers in numeric format.
             Make sure the output is concise and to the point.
@@ -2564,7 +2552,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             Begin generating the report using the transcript content and template structure provided.
             """
 
-        elif template_type =="right_and_left_heart_study ":
+        elif template_type =="right_and_left_heart_study":
             user_instructions = user_prompt
 
             system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
@@ -3093,7 +3081,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             Begin generating the report using the transcript content and template structure provided.
             """
 
-        elif template_type =="detailed_dietician_initial_assessment:":
+        elif template_type =="detailed_dietician_initial_assessment":
             user_instructions = user_prompt
 
             system_message = f"""You are a medical documentation assistant tasked with generating a structured and clinically relevant medical report based on the specified template: {template_type.replace("_", " ").upper()}.
