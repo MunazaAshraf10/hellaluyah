@@ -12427,7 +12427,8 @@ async def generate_template_report(
             "report_status": "failed"
         }, status_code=500)
 
-template_display_map= {
+
+template_display_map = {
     "detailed_soap_note": "SOAP Detailed",
     "new_soap_note": "S.O.A.P (Default)",
     "soap_issues": "SOAP Issues",
@@ -12461,13 +12462,791 @@ template_display_map= {
     "progress_note": "Progress Note",
     "detailed_dietician_initial_assessment": "Detailed Dietician Initial Assessment"
 }
+template_structures_verbose = {
+    "cardiology_consult": {
+        "display_name": "Cardiology Consult",
+        "structure": [
+            {"Reason For Visit": "Describe the clinical reason for today's cardiac assessment."},
+            {"Cardiac Risk Factors": "Include BMI, hypertension, diabetes, smoking history, and family history of cardiac disease."},
+            {"Cardiac History": "Summarize any cardiac diagnoses (e.g., heart failure, arrhythmias, previous interventions)."},
+            {"Other Medical History": "List relevant non-cardiac conditions and surgical history."},
+            {"Current Medications": "Categorize medications such as antithrombotics, antihypertensives, heart failure drugs, and others."},
+            {"Allergies and Intolerances": "Mention drug or substance allergies, with reaction details if available."},
+            {"Social History": "Brief lifestyle background including living situation, occupation, smoking/alcohol/drug use."},
+            {"History": "Comprehensive history of presenting illness and relevant symptom narratives."},
+            {"Physical Examination": "Findings from cardiovascular, respiratory, and general exams including vitals."},
+            {"Investigations": "Summarize recent lab tests, ECGs, echocardiograms, and other diagnostics."},
+            {"Summary": "One-paragraph summary of case including demographics, symptoms, and key findings."},
+            {"Assessment/Plan": "Structured issues with diagnosis and management plans per condition."},
+            {"Follow-Up": "Document next review plans, timelines, or patient instructions."}
+        ]
+    },
+    "echocardiography_report_vet": {
+        "display_name": "Echocardiography Report (Vet)",
+        "structure": [
+            {"VET Echocardiography Report": "Report title for veterinary cardiac imaging."},
+            {"Patient Information": "Includes patient name, species, breed, age, sex, and weight."},
+            {"Reason for Echocardiography": "Brief reason for referral or presenting complaint."},
+            {"Echocardiographic Findings": "Detailed structural and functional findings for each heart chamber and valve."},
+            {"Measurements": "Numeric values such as LA/Ao ratio, EPSS, etc."},
+            {"Interpretation": "Clinically relevant interpretation of imaging results."},
+            {"Diagnosis": "Primary echocardiographic diagnosis."},
+            {"Recommendations": "Suggestions for treatment, follow-up, or further diagnostics."}
+        ]
+    },
+    "cardio_consult": {
+        "display_name": "Cardio Consult",
+        "structure": [
+            {"Subjective": "Describes symptoms, past cardiovascular history, lifestyle, and allergies."},
+            {"Objective": "Summarizes vital signs, exam findings, and cardiovascular investigations."},
+            {"Assessment": "Diagnoses or clinical impressions related to cardiovascular issues."},
+            {"Plan": "Treatment steps, referrals, medications, and counseling provided."}
+        ]
+    },
+     "cardio_patient_explainer": {
+        "display_name": "Cardio Patient Explainer",
+        "structure": [
+            {"1. [Topic/Issue #1: Description]": "Explain the first health topic in layman's terms, including its meaning and required actions or medications."},
+            {"2. [Topic/Issue #2: Description]": "Describe another issue or topic, symptoms to monitor, and next steps or follow-up actions."},
+            {"3. [Topic/Issue #3: Description]": "Summarize any additional discussion points with patient guidance and advice."},
+            {"Next Steps": "Clearly state what the patient needs to do next, such as follow-up, start medications, or watch for side effects."},
+            {"Closing Note": "A friendly conclusion thanking the patient and encouraging them to reach out with concerns."}
+        ]
+    },
+    "coronary_angiograph_report": {
+        "display_name": "Coronary Angiograph Report",
+        "structure": [
+            {"Indication": "Reason for the procedure, such as chest pain or suspected coronary artery disease."},
+            {"Access & Setup": "Details about vascular access site, catheter types, anesthesia, and procedural prep."},
+            {"Sedation & Medications Administered": "List of medications used during the procedure, including dosages."},
+            {"Procedure Performed": "Specify whether the procedure was diagnostic or interventional."},
+            {"Findings": "Structured findings for each artery, including flow, stenosis, and anatomical observations."},
+            {"Closure Technique": "Describe how the access site was closed and any post-procedure instructions."},
+            {"Complications": "Mention any complications or explicitly state 'None' if documented."},
+            {"Conclusion / Summary": "A high-level interpretation of the overall findings."},
+            {"Recommendations / Next Steps": "Advice on follow-up care, medications, or lifestyle adjustments."}
+        ]
+    },
+    "left_heart_catheterization": {
+        "display_name": "Left Heart Catheterization",
+        "structure": [
+            {"Summary": "Main findings, interventions, and key metrics like LVEDP and ejection fraction."},
+            {"Right Heart Catheterization": "Hemodynamic readings like RA, RV, PA pressures, and cardiac index, if performed."},
+            {"Procedures Performed": "List of catheter-based procedures carried out, with equipment details."},
+            {"Interventions": "Details about treated lesions, tools used (wires, stents), and pre/post metrics."},
+            {"Recommendations": "Post-op care including medications, monitoring, and risk factor guidance."},
+            {"Coronary Anatomy": "Description of each coronary vessel’s structure and dominance, if documented."}
+        ]
+    },
+    "right_and_left_heart_study": {
+        "display_name": "Right and Left Heart Study",
+        "structure": [
+            {"Clinical Indication": "Why the study was performed, such as to assess dyspnea or pulmonary hypertension."},
+            {"Procedure Performed": "Brief mention of right and left heart cath or similar interventions."},
+            {"Technique & Access": "Access site, catheter types, and medications used."},
+            {"Hemodynamic Measurements": "Recorded pressures from different cardiac chambers and arteries."},
+            {"Oximetry / Saturation Data": "O2 saturation readings from various vessels, if available."},
+            {"Closure Technique": "How the vascular access site was closed post-procedure."},
+            {"Conclusion / Summary": "Summarize hemodynamic status and key interpretations from the study."}
+        ]
+    },
+    "toe_guided_cardioversion_report": {
+        "display_name": "TOE Guided Cardioversion Report",
+        "structure": [
+            {"Clinical Indication": "State the clinical reason for the procedure, such as atrial fibrillation, flutter, or pre-cardioversion assessment."},
+            {"Procedure Description": "Describe the procedural approach, including anesthesia, setting, and method of cardioversion under TOE guidance."},
+            {"Transoesophageal Echocardiogram Findings": "Summarize TOE results, particularly the presence or absence of intracardiac thrombus or other abnormalities."},
+            {"ECG Findings Before Cardioversion": "Mention pre-cardioversion rhythm, rate, and any notable ECG features."},
+            {"Cardioversion Details": "Detail number of shocks, energy settings, and the rhythm outcome (e.g., sinus restoration)."},
+            {"Complications": "State if any complications occurred during the procedure, only if explicitly mentioned."},
+            {"Conclusion / Summary": "Concise summary of procedural outcome, such as successful restoration of sinus rhythm."},
+            {"Recommendations": "Include instructions for post-cardioversion care, medications, and follow-up."}
+        ]
+    },
+    "hospitalist_progress_note": {
+        "display_name": "Hospitalist Progress Note",
+        "structure": [
+            {"Clinical Course": "Summarize patient background, reason for admission, and clinical progress since admission."},
+            {"Today's Updates": "Narrative of condition changes, new events, interventions, and diagnostics within the last 24 hours."},
+            {"Review of Systems (ROS)": "Mention any positive or negative findings from the ROS, only if explicitly stated."},
+            {"Physical Exam": "Summarize physical examination findings including vitals and systemic assessments."},
+            {"Assessment and Plan": "List medical issues with condition name, assessment, plan, and any counseling provided."},
+            {"Fluids, Electrolytes, Diet": "Document fluid status, electrolyte needs, and dietary orders."},
+            {"DVT prophylaxis": "Name of prophylactic agent ordered, if stated."},
+            {"Central line": "Presence and purpose of central line, if documented."},
+            {"Foley catheter": "Presence and indication for Foley catheter, if present."},
+            {"Code Status": "Mention resuscitation status (e.g., Full Code, DNR), if explicitly stated."},
+            {"Disposition": "Include discharge timeline, rehab needs, or social services efforts, if mentioned."}
+        ]
+    },
+    "multiple_issues_visit": {
+        "display_name": "Multiple Issues Visit",
+        "structure": [
+            {"Consent": "Document if the patient consented to use of electronic scribing (include only if mentioned)."},
+            {"Summary for Follow up": "Bullet-point list of each issue’s differential diagnosis and treatment summary."},
+            {"Issue 1": "Full detail of Issue 1 with history, objective findings, diagnosis, plan, investigations, treatment, and referrals."},
+            {"Issue 2": "Full detail of Issue 2 with history, objective findings, diagnosis, plan, investigations, treatment, and referrals."},
+            {"Issue 3, 4, 5...": "Full detail of subsequent issues following the same format, depending on transcript content."}
+        ]
+    },
+    "physio_soap_outpatient": {
+        "display_name": "Physio SOAP Outpatient",
+        "structure": [
+            {"Current Condition/Complaint": "Summarize symptom progress, medication usage, radiology findings, and adherence to plan since last visit."},
+            {"Objective": "Group and list physical findings and examination data like ROM, strength, posture, etc."},
+            {"Treatment": "List all treatments provided — education, hands-on techniques, exercises, and HEP (with reps, sets, and frequency)."},
+            {"Assessment": "State diagnosis and progress summary based on findings, goals, and barriers (if mentioned)."},
+            {"Plan": "Outline future treatment plan, next review date, and any referrals or communications needed."}
+        ]
+    },
+    "counseling_consultation": {
+        "display_name": "Counseling Consultation",
+        "structure": [
+            {"Current Presentation": "Key concerns or presenting issues raised by the patient, including severity and daily impact."},
+            {"Session Content": "Detailed overview of topics discussed, patient’s thoughts and insights, and any realizations made during the session."},
+            {"Obstacles, Setbacks and Progress": "Challenges the patient is facing, any recent regressions, and progress since the previous session."},
+            {"Session Summary": "Clinician's summary of key themes, emotional responses, behavioral patterns, and therapeutic interpretations."},
+            {"Next Steps": "Agreed-upon goals, future therapeutic tasks, or scheduling of the next session."}
+        ]
+    },
+    "gp_consult_note": {
+        "display_name": "GP Consult Note",
+        "structure": [
+            {"History": "Detailed symptom-wise history including quality, severity, duration, associated symptoms, and current or planned treatments."},
+            {"Past history": "Past medical and surgical history, ongoing treatments, and medication side effects if explicitly mentioned."},
+            {"Family history": "Any relevant familial health background and social determinants if discussed."},
+            {"Examination": "Findings from physical or mental examination, including vitals and noted abnormalities."},
+            {"Plan": "Clinical management strategies including medications, follow-up, referrals, or investigations."}
+        ]
+    },
+   "detailed_dietician_initial_assessment": {
+        "display_name": "Detailed Dietician Initial Assessment",
+        "structure": [
+            {"Weight History": "Includes dieting attempts, weight fluctuation patterns, and baseline (pre-morbid) weight."},
+            {"Body Image": "Behaviors or emotions related to body checking or avoidance."},
+            {"Disordered Eating/Eating Disorder Behavior": "Patterns of restrictive eating, binging, purging, compulsive behaviors, and substance use for weight control."},
+            {"Eating Behavior": "Cues for hunger/fullness, food rules, allergies, and dietary preferences."},
+            {"Nutrition Intake": "Daily food and fluid intake structure including meals, snacks, and timing."},
+            {"Physical Activity Behavior": "Types and frequency of physical activity and the client’s relationship with exercise."},
+            {"Medical & Psychiatric History": "Existing or previous diagnoses, treatments, or relevant conditions."},
+            {"Menstrual History": "Onset age, cycle pattern, symptoms, and contraceptive use."},
+            {"Gut/Bowel Health": "Digestive and bowel function observations or concerns."},
+            {"Pathology/Scans": "Available ECG, BMD, or related lab/imaging reports."},
+            {"Medications/Supplements": "Current prescribed or over-the-counter supplements and medications."},
+            {"Social History/Lifestyle": "Living situation, occupation, habits (alcohol/smoking), stress, sleep, self-care routines, and other health providers involved."}
+        ]
+    },
+   "referral_letter": {
+    "display_name": "Referral Letter",
+    "structure": [
+        {"Practice Letterhead": "Include '[Practice Letterhead]' if not known."},
+        {"Date": "Use current date in DD/MM/YYYY format."},
+        {"To": {
+            "Consultant Name": "Include 'Dr. [Consultant’s Name]' if known, otherwise default.",
+            "Specialist Clinic/Hospital Name": "Add '[Specialist Clinic/Hospital Name]' if unknown.",
+            "Address": "Add address or '[Address Line 1]\n[Address Line 2]\n[City, Postcode]' if unknown."
+        }},
+        {"Salutation": "Use 'Dear Dr. [Consultant’s Last Name]' or default if not known."},
+        {"Referral Subject Line": "Use 'Re: Referral for [Patient’s Name], [Date of Birth: DOB]'. Use placeholders if not known."},
+        {"Introductory Sentence": "Brief line stating purpose of referral and clinical concern."},
+        {"Clinical Details": {
+            "Presenting Complaint": "Primary symptoms or reason for visit.",
+            "Duration": "Duration of symptoms.",
+            "Relevant Findings": "Pertinent clinical or exam findings.",
+            "Past Medical History": "Relevant chronic conditions.",
+            "Current Medications": "List of current medications."
+        }},
+        {"Investigations": {
+            "Recent Tests": "Test names or types performed.",
+            "Results": "Findings or measurements if explicitly mentioned."
+        }},
+        {"Reason for Referral": "State the rationale behind referring the patient."},
+        {"Patient’s Contact Information": {
+            "Phone Number": "If explicitly provided.",
+            "Email Address": "If explicitly provided."
+        }},
+        {"Enclosures": "Include line only if test results or documents were mentioned."},
+        {"Closing": "Thanking sentence and follow-up expectation."},
+        {"Signature Block": {
+            "Your Full Name": "Referring clinician's full name or placeholder.",
+            "Your Title": "Referring clinician's title or placeholder.",
+            "Your Contact Information": "Include only if available.",
+            "Your Practice Name": "If not available, placeholder '[Practice Letterhead]'."
+        }}
+    ]
+},
+   "consult_note": {
+    "display_name": "Consult Note",
+    "structure": [
+        {"Consultation Type": {
+            "Method": "F2F or T/C based on transcript.",
+            "Accompaniment": "Seen alone or with someone.",
+            "Reason for Visit": "Stated reason for consultation."
+        }},
+        {"History": {
+            "History of Presenting Complaints": "Chief complaint with timing, severity, etc.",
+            "ICE": "Ideas, Concerns, Expectations.",
+            "Red Flag Symptoms": "Mentioned danger signs.",
+            "Relevant Risk Factors": "E.g., smoking, chronic disease.",
+            "Past Medical/Surgical History": "Previous diagnoses or surgeries.",
+            "Drug History / Allergies": "Current meds and allergy history.",
+            "Family History": "Mentioned genetic/family conditions.",
+            "Social History": "Living, occupation, lifestyle, travel."
+        }},
+        {"Examination": {
+            "Vital Signs": "Temperature, HR, RR, BP, etc.",
+            "Physical/Mental State Examination Findings": "Relevant clinical exam observations.",
+            "Investigations with Results": "Tests mentioned and outcomes."
+        }},
+        {"Impression": "Issue-wise diagnosis or differential."},
+        {"Plan": {
+            "Investigations Planned": "Further diagnostics intended.",
+            "Treatment Planned": "Prescribed medications or therapy.",
+            "Relevant Referrals": "Referred departments or clinicians.",
+            "Follow-up Plan": "Follow-up date/timeframe.",
+            "Advice": "Safety-netting, home-care, symptom alerts."
+        }}
+    ]
+},
+   "mental_health_appointment": {
+    "display_name": "Mental Health Appointment",
+    "structure": [
+        {"Chief Complaint": "Primary mental health issue and presenting symptoms."},
+        {"Past medical & psychiatric history": "Previous diagnoses, treatments, medications, or hospitalizations."},
+        {"Family History": "Family psychiatric illnesses, if discussed."},
+        {"Social History": "Occupation, education level, substance use, social supports, and relevant lifestyle context."},
+        {"Mental Status Examination": "Appearance, behavior, speech, mood, affect, thoughts, perceptions, cognition, insight, judgment."},
+        {"Risk Assessment": "Include details of suicidal ideation, homicidality, or other safety risks if mentioned."},
+        {"Diagnosis": "DSM-5 or other clinical diagnosis explicitly discussed."},
+        {"Treatment Plan": "Investigations, medications, therapy modalities, referrals, follow-up, and planned actions."},
+        {"Safety Plan": "Steps to take during crises if explicitly discussed."}
+    ]
+},
+    "clinical_report": {
+    "display_name": "Clinical Interview Report",
+    "structure": [
+        {"Presenting Problems": "Bullet points describing presenting concerns and associated stressors."},
+        {"History of Presenting Problems": "Details on onset, course, severity of problems."},
+        {"Current Functioning": [
+            {"Sleep": "Sleep disturbances or patterns."},
+            {"Employment/Education": "Work/school details, impact of symptoms."},
+            {"Family": "Dynamics and effects of condition on family."},
+            {"Social": "Social network and relationships."},
+            {"Exercise/Physical Activity": "Exercise frequency, limitations."},
+            {"Eating Regime/Appetite": "Eating behavior, appetite changes."},
+            {"Energy Levels": "Daily energy level variation."},
+            {"Recreational/Interests": "Loss of or change in hobbies."}
+        ]},
+        {"Current Medications": "Names, dosages, and frequencies of active prescriptions."},
+        {"Psychiatric History": "Past psychiatric diagnoses, hospitalizations, treatments."},
+        {"Medical History": "Personal and family medical background."},
+        {"Developmental, Social and Family History": [
+            {"Family": "Family of origin, early life."},
+            {"Developmental History": "Milestones, delays."},
+            {"Educational History": "Academic background, performance."},
+            {"Employment History": "Work history, stability."},
+            {"Relationship History": "Romantic relationship history, patterns."},
+            {"Forensic/Legal History": "Legal issues or criminal involvement."}
+        ]},
+        {"Substance Use": "Current or past use of alcohol, tobacco, drugs."},
+        {"Relevant Cultural/Religious/Spiritual Issues": "If cultural/spiritual identity is clinically relevant."},
+        {"Risk Assessment": [
+            {"Suicidal Ideation": "Thoughts, attempts, plans."},
+            {"Homicidal Ideation": "Any mention of harm to others."},
+            {"Self-harm": "Current or past behaviors."},
+            {"Violence & Aggression": "Incidents, risk level."},
+            {"Risk-taking/Impulsivity": "Impulsive or risky behavior."}
+        ]},
+        {"Mental State Exam": [
+            {"Appearance": "Grooming, dress, physical state."},
+            {"Behaviour": "Eye contact, psychomotor activity."},
+            {"Speech": "Pace, volume, coherence."},
+            {"Mood": "Reported emotional state."},
+            {"Affect": "Observed emotional response."},
+            {"Perception": "Hallucinations, dissociation."},
+            {"Thought Process": "Flow and coherence of thoughts."},
+            {"Thought Form": "Formal thought disorder if present."},
+            {"Orientation": "Awareness of time, place, self."},
+            {"Memory": "Short/long-term recall."},
+            {"Concentration": "Focus and attention span."},
+            {"Attention": "Ability to stay engaged."},
+            {"Judgement": "Decision-making capacity."},
+            {"Insight": "Awareness of mental condition."}
+        ]},
+        {"Test Results": "Psychometric or questionnaire outcomes."},
+        {"Diagnosis": "Any DSM-5 diagnoses provided."},
+        {"Clinical Formulation": [
+            {"Presenting Problem": "Symptoms or condition described."},
+            {"Predisposing Factors": "Historical vulnerabilities."},
+            {"Precipitating Factors": "Recent triggers."},
+            {"Perpetuating Factors": "Ongoing contributors."},
+            {"Protecting Factors": "Resilience or buffers."},
+            {"Case formulation": "Narrative paragraph synthesizing above factors."}
+        ]},
+        {"Additional Notes": "Any information not captured above."}
+    ]
+},
+    "psychology_session_notes": {
+    "display_name": "Psychology Session Notes",
+    "structure": [
+        {"Out of Session Task Review": [
+            {"Task Engagement": "Client’s practice of skills/strategies from previous session."},
+            {"Effectiveness": "Effectiveness and outcomes of tasks."},
+            {"Obstacles": "Barriers or challenges faced."}
+        ]},
+        {"Current Presentation": [
+            {"Symptoms": "Reported mental/emotional symptoms."},
+            {"Changes": "New or changing issues since last session."}
+        ]},
+        {"Session Content": [
+            {"Issues Raised": "Topics brought up by client."},
+            {"Discussion": "Therapist-client interactions, shared insights."},
+            {"Therapy Goals": "Goals defined or reiterated."},
+            {"Progress": "Client’s progress toward goals."},
+            {"Themes and Insights": "Client realizations, therapist reflections."}
+        ]},
+        {"Intervention": [
+            {"Approach": "Modality used (e.g., CBT, DBT)."},
+            {"Techniques": "Specific strategies or methods applied."}
+        ]},
+        {"Setbacks/Barriers/Progress": [
+            {"Treatment Barriers": "Obstacles to progress."},
+            {"Client Satisfaction": "Client’s views on therapy process."}
+        ]},
+        {"Risk Assessment and Management": [
+            {"Suicidal Ideation": "Thoughts, plans, behaviors."},
+            {"Homicidal Ideation": "Any mention of harm to others."},
+            {"Self-harm": "Current or past behavior."},
+            {"Violence & Aggression": "History or risk indicators."},
+            {"Management Plan": "Crisis response plans if applicable."}
+        ]},
+        {"Mental Status Examination": [
+            {"Appearance": "Physical presentation."},
+            {"Behaviour": "Interaction and movements."},
+            {"Speech": "Fluency and rhythm."},
+            {"Mood": "Self-described mood."},
+            {"Affect": "Observed emotional state."},
+            {"Thoughts": "Cognitive content and pattern."},
+            {"Perceptions": "Hallucinations or misperceptions."},
+            {"Cognition": "Mental processing and awareness."},
+            {"Insight": "Client understanding of their condition."},
+            {"Judgment": "Ability to make appropriate decisions."}
+        ]},
+        {"Out of Session Tasks": "Planned assignments for the next session."},
+        {"Plan for Next Session": [
+            {"Next Session": "Date and time of follow-up."},
+            {"Focus": "Topics or interventions planned."}
+        ]}
+    ]
+},
+    "speech_pathology_note": {
+    "display_name": "Speech Pathology Report",
+    "structure": [
+        {"Therapy session attended to": [
+            "Describe current issues, reasons for visit, history of presenting complaints.",
+            "Include past medical history and previous surgeries.",
+            "Mention medications and herbal supplements if discussed.",
+            "Summarize relevant social history.",
+            "Include allergies if mentioned."
+        ]},
+        {"Objective": [
+            "Describe objective findings from speech-language assessment or physical examination.",
+            "Mention any relevant diagnostic tests and results if available."
+        ]},
+        {"Reports": [
+            "Summarize any previous or external reports mentioned."
+        ]},
+        {"Therapy": [
+            "Describe current therapy, intervention techniques.",
+            "Mention any recent changes or adjustments to therapy."
+        ]},
+        {"Outcome": [
+            "Describe outcomes or observations from the current or recent therapy session."
+        ]},
+        {"Plan": [
+            "Outline the future therapy plan or intervention approach.",
+            "Include follow-up sessions, referrals, or caregiver instructions."
+        ]}
+    ]
+},
+    "progress_note": {
+    "display_name": "Progress Note",
+    "structure": [
+        {"Clinic Letterhead": "Include if explicitly present in context or use default if required."},
+        {"Clinic Address": [
+            "Line 1",
+            "Line 2"
+        ]},
+        {"Contact": [
+            "Phone Number",
+            "Fax Number"
+        ]},
+        {"Practitioner": "Full name and title of the practitioner."},
+        {"Patient Details": [
+            "Surname",
+            "First Name",
+            "Date of Birth (DD/MM/YYYY)"
+        ]},
+        {"Progress Note Date": "Date of note (DD Month YYYY)."},
+        {"Introduction": "Brief narrative on patient's age, marital status, and living situation."},
+        {"Patient’s History and Current Status": "Relevant past medical and mental health history and treatment response."},
+        {"Presentation in Clinic": "Narrative of physical and emotional appearance, demeanor, accompanied by whom."},
+        {"Mood and Mental State": "Mood stability, suicidal ideation, safety perception, hallucinations or paranoia if present."},
+        {"Social and Functional Status": "Daily function, relationships, participation in support programs, and level of independence."},
+        {"Physical Health Issues": "Mention physical conditions (e.g., arthritis, obesity) and related management advice."},
+        {"Plan and Recommendations": [
+            "Continue current medications",
+            "Ongoing programs",
+            "Lifestyle or health advice",
+            "Follow-up appointments"
+        ]},
+        {"Closing Statement": "Final remarks or reminders shared with the patient."},
+        {"Practitioner Signature Block": "Practitioner's Full Name and 'Consultant Psychiatrist'"}
+    ]
+},
+    "meeting_minutes": {
+        "display_name": "Meeting Minutes",
+        "structure": [
+            {"Date": "Date of the meeting, based on transcript or use current date if not available."},
+            {"Time": "Time of the meeting if explicitly mentioned; otherwise, leave blank."},
+            {"Location": "Location of the meeting if explicitly mentioned; otherwise, leave blank."},
+            {"Attendees": "List of attendees present in the meeting. Only include if stated in the transcript."},
+            {"Agenda Items": "Bullet list of agenda topics planned for discussion, if mentioned."},
+            {"Discussion Points": "Detailed summary of discussions held, decisions explored, concerns raised, and any dialogue of importance."},
+            {"Decisions Made": "Summarized list of resolutions or conclusions reached during the meeting."},
+            {"Action Items": "List of actionable tasks with designated responsible individuals or teams, if mentioned."},
+            {"Next Meeting": [
+                {"Date": "Date of the next scheduled meeting, if provided."},
+                {"Time": "Time of the next scheduled meeting, if provided."},
+                {"Location": "Location of the next meeting, if stated."}
+            ]}
+        ]
+    },
+    "followup_note": {
+        "display_name": "Follow-Up Consultation Note",
+        "structure": [
+            {"Date": "Date of follow-up session in DD/MM/YYYY format. Use current date if not explicitly provided."},
+            {"History of Presenting Complaints": [
+                "Summary of current symptoms or concerns raised by the patient.",
+                "Notable changes in symptoms since previous session.",
+                "Medication adherence, side effects, or recent changes.",
+                "Observations regarding sleep, appetite, energy, and concentration."
+            ]},
+            {"Mental Status Examination": [
+                "Appearance: grooming, posture, clothing.",
+                "Behavior: cooperation, eye contact, motor activity.",
+                "Speech: fluency, rate, articulation.",
+                "Mood: patient-reported mood state.",
+                "Affect: observed emotional expression.",
+                "Thoughts: logical flow, intrusive thoughts, delusions.",
+                "Perceptions: hallucinations or sensory disturbances.",
+                "Cognition: orientation, memory, concentration.",
+                "Insight: patient awareness of illness.",
+                "Judgment: decision-making ability."
+            ]},
+            {"Risk Assessment": [
+                "Presence of suicidal or homicidal ideation.",
+                "Self-harm tendencies or recent incidents.",
+                "Protective factors like family support or coping strategies."
+            ]},
+            {"Diagnosis": [
+                "Primary psychiatric diagnosis per DSM/ICD.",
+                "Any comorbid psychiatric or medical conditions.",
+                "Provisional diagnoses if applicable."
+            ]},
+            {"Treatment Plan": [
+                "Details of prescribed medications and any changes.",
+                "Recommended therapies or interventions.",
+                "Next follow-up interval and reasons.",
+                "Additional referrals or investigations ordered."
+            ]},
+            {"Safety Plan": [
+                "Crisis support instructions.",
+                "Warning signs and symptom escalation plans.",
+                "Emergency contacts and hospitalization triggers."
+            ]},
+            {"Additional Notes": [
+                "Relevant discussions not covered in other sections.",
+                "Family involvement or feedback.",
+                "Social, financial, or logistical barriers discussed."
+            ]}
+        ]
+    },
+    "detailed_soap_note": {
+        "display_name": "Detailed SOAP Note",
+        "structure": [
+            {"Subjective": [
+                "Current complaints (e.g., symptoms, reasons for visit, onset, duration, location, quality, severity, aggravating/relieving factors, progression, impact on daily life)",
+                "Past medical and surgical history (only if mentioned)",
+                "Medications and supplements (including dosages and usage patterns)",
+                "Social history (lifestyle, occupation, stressors, living conditions)",
+                "Allergies (drug/environmental)",
+                "Narrative summary: symptom evolution, non-pharmacologic efforts, lifestyle factors, medication response, recent changes, ROS positives/negatives"
+            ]},
+            {"Review of Systems": [
+                {"General": "Include any systemic symptoms such as fatigue, fever, weight loss, or malaise."},
+                {"Skin": "Note any rashes, itching, dryness, or other dermatologic issues."},
+                {"Head": "Document any headaches, dizziness, or head-related complaints."},
+                {"Eyes": "Mention vision changes, eye pain, redness, discharge, or photophobia."},
+                {"Ears": "Include hearing loss, tinnitus, ear pain, or discharge."},
+                {"Nose": "Capture nasal congestion, rhinorrhea, nosebleeds, or sinus pressure."},
+                {"Throat": "Document sore throat, hoarseness, or swallowing difficulties."},
+                {"Neck": "Mention neck pain, stiffness, swelling, or lymphadenopathy."},
+                {"Respiratory": "Include cough, shortness of breath, wheezing, or chest tightness."},
+                {"Cardiovascular": "Note chest pain, palpitations, leg swelling, or known heart issues."},
+                {"Gastrointestinal": "Include nausea, vomiting, diarrhea, constipation, abdominal pain, or appetite changes."},
+                {"Genitourinary": "Mention urinary frequency, urgency, dysuria, hematuria, or incontinence."},
+                {"Musculoskeletal": "Document joint pain, muscle aches, stiffness, or mobility issues."},
+                {"Neurological": "Include numbness, tingling, weakness, balance problems, or seizures."},
+                {"Psychiatric": "Capture symptoms like anxiety, depression, mood swings, or sleep disturbances."},
+                {"Endocrine": "Note intolerance to heat/cold, excessive thirst, hunger, or sweating."},
+                {"Hematologic/Lymphatic": "Include easy bruising, bleeding, anemia, or swollen lymph nodes."},
+                {"Allergic/Immunologic": "Mention allergies, frequent infections, or immune-related symptoms."}
+            ]},
+            {"Objective": [
+                "Vital signs (BP, HR, RR, Temp, O2 Sat)",
+                "General appearance",
+                "System-specific findings (e.g., HEENT, cardiac, respiratory, abdomen, neuro, skin) — paragraph format only if mentioned"
+            ]},
+            {"Assessment": [
+                "Overall impression or diagnosis (if mentioned)",
+                {
+                    "Per Issue": [
+                        "Issue name (e.g., Chest Pain)",
+                        "Assessment: probable diagnosis",
+                        "Differential diagnosis (if discussed or inferred)",
+                        "Diagnostic tests (omit if not mentioned)",
+                        "Treatment plan (only if mentioned)",
+                        "Referrals or follow-up care (only if mentioned)"
+                    ]
+                }
+            ]},
+            {"Follow-Up": [
+                "Instructions for worsening or non-improving symptoms",
+                "Scheduled follow-up or test review timeline",
+                "Education provided and patient’s understanding of the plan"
+            ]}
+        ]
+    },
+    "case_formulation": {
+        "display_name": "Case Formulation",
+        "structure": [
+            {"CLIENT GOALS": "List goals and aspirations explicitly mentioned by the client."},
+            {"PRESENTING PROBLEM/S": "Describe presenting issues, complaints, or challenges."},
+            {"PREDISPOSING FACTORS": "Historical or background factors contributing to current issues."},
+            {"PRECIPITATING FACTORS": "Recent triggers or events that led to symptom onset or worsening."},
+            {"PERPETUATING FACTORS": "Ongoing behaviors, beliefs, or environments that sustain the issue."},
+            {"PROTECTIVE FACTORS": "Strengths, supports, or coping strategies helping the client manage."},
+            {"PROBLEM LIST": "Concrete list of identifiable mental health issues or clinical problems."},
+            {"TREATMENT GOALS": "Objectives the client aims to achieve through therapy."},
+            {"CASE FORMULATION": "Narrative summary integrating biopsychosocial context and explaining symptom development/maintenance."},
+            {"TREATMENT MODE/INTERVENTIONS": "Current or planned therapeutic modalities (e.g., CBT, medication)."}
+        ]
+    },
+    "discharge_summary": {
+        "display_name": "Discharge Summary",
+        "structure": [
+            {"Client Name": "Client’s full name (include only if explicitly mentioned)."},
+            {"Date of Birth": "Client’s date of birth (if mentioned)."},
+            {"Date of Discharge": "The date the client was discharged (if mentioned)."},
+            {"Referral Information": [
+                "Referral Source: Name/contact of referring party",
+                "Reason for Referral: Reason for seeking therapy"
+            ]},
+            {"Presenting Issues": "List presenting issues or symptoms."},
+            {"Diagnosis": "List final diagnosis/diagnoses (if explicitly mentioned)."},
+            {"Treatment Summary": [
+                "Duration of Therapy: Start to end date of therapy",
+                "Number of Sessions: Total sessions attended",
+                "Type of Therapy: CBT, ACT, DBT, etc.",
+                "Therapeutic Goals: Goal 1, Goal 2, Goal 3, etc.",
+                "Summary of Treatment Provided: Therapy type/frequency/duration",
+                "Medications Prescribed"
+            ]},
+            {"Progress and Response to Treatment": [
+                "Overall progress",
+                "Progress Toward Goals: List per goal"
+            ]},
+            {"Clinical Observations": [
+                "Client's Engagement",
+                "Client's Strengths: List of strengths",
+                "Client's Challenges: List of challenges"
+            ]},
+            {"Risk Assessment": "Summary of risk at discharge."},
+            {"Outcome of Therapy": [
+                "Current Status",
+                "Remaining Issues",
+                "Client’s Perspective",
+                "Therapist's Assessment"
+            ]},
+            {"Reason for Discharge": [
+                "Discharge Reason",
+                "Client's Understanding and Agreement"
+            ]},
+            {"Discharge Plan": "Planned referrals, follow-ups, or continued care instructions."},
+            {"Recommendations": [
+                "General recommendations",
+                "Follow-Up Care: List of specific recommendations",
+                "Self-Care Strategies: Client-led strategies",
+                "Crisis Plan",
+                "Support Systems"
+            ]},
+            {"Additional Notes": "Extra observations or instructions."},
+            {"Final Note": [
+                "Therapist’s Closing Remarks",
+                "Clinician's Name",
+                "Clinician's Signature",
+                "Date",
+                "Attachments (if any)"
+            ]}
+        ]
+    },
+    "h75": {
+        "display_name": ">75 Health Assessment",
+        "structure": [
+            {"Medical History": [
+                "Chronic conditions",
+                "Smoking history",
+                "Current presentation",
+                "Medications prescribed",
+                "Last specialist, dental, optometry visits recorded",
+                "Latest screening tests noted (BMD, FOBT, CST, mammogram)",
+                "Vaccination status updated (flu, COVID-19, pneumococcal, shingles, tetanus)",
+                "Sleep quality affected by snoring or daytime somnolence",
+                "Vision",
+                "Presence of urinary and/or bowel incontinence",
+                "Falls reported in last 3 months",
+                "Independent with activities of daily living",
+                "Mobility limits documented",
+                "Home support and ACAT assessment status confirmed",
+                "Advance care planning documents (Will, EPoA, AHD) up to date",
+                "Cognitive function assessed"
+            ]},
+            {"Social History": [
+                "Engagement in hobbies and social activities",
+                "Living arrangements and availability of social supports",
+                "Caregiver roles identified"
+            ]},
+            {"Sleep": [
+                "Sleep difficulties or use of sleep aids documented"
+            ]},
+            {"Bowel and Bladder Function": [
+                "Continence status described"
+            ]},
+            {"Hearing and Vision": [
+                "Hearing aid use and comfort noted",
+                "Recent audiology appointment recorded",
+                "Glasses use and last optometry review noted"
+            ]},
+            {"Home Environment & Safety": [
+                "Home access and safety features documented",
+                "Assistance with cleaning, cooking, gardening reported",
+                "Financial ability to afford food and services addressed"
+            ]},
+            {"Mobility and Physical Function": [
+                "Ability to bend, kneel, climb stairs, dress, bathe independently",
+                "Use of walking aids and quality footwear",
+                "Exercise or physical activity levels described"
+            ]},
+            {"Nutrition": [
+                "Breakfast",
+                "Lunch",
+                "Dinner",
+                "Snacks",
+                "Dental or swallowing difficulties"
+            ]},
+            {"Transport": [
+                "Use of transport services or family support for appointments"
+            ]},
+            {"Specialist and Allied Health Visits": [
+                "Next specialist and allied health appointments planned"
+            ]},
+            {"Health Promotion & Planning": [
+                "Chronic disease prevention and lifestyle advice provided",
+                "Immunisations and screenings reviewed and updated",
+                "Patient health goals and advance care planning discussed",
+                "Referrals made as needed",
+                "Follow-up and recall appointments scheduled"
+            ]}
+        ]
+    },
+    "new_soap_note": {
+        "display_name": "SOAP Note",
+        "structure": [
+            {"Subjective": "Chief complaints with duration, severity, alleviating/worsening factors, and daily impact — listed as bullet points."},
+            {"Past Medical History": "Relevant conditions, medications, surgeries, investigations, and immunization history — listed as bullet points."},
+            {"Social History": "Social factors (e.g., smoking, alcohol, job stress) relevant to complaints — listed as bullet points."},
+            {"Family History": "Family illnesses relevant to the presenting issue(s) — listed as bullet points."},
+            {"Objective": "Vital signs, examination findings, and any available results — listed as bullet points."},
+            {"Assessment & Plan": "Each issue assessed with subheadings: Diagnosis, Differential Diagnosis, Investigations, Treatment, Referrals/Follow-Up. Group related issues where applicable."}
+        ]
+    },
+    "soap_issues": {
+        "display_name": "SOAP Issues",
+        "structure": [
+            {"Subjective": [
+                "Per issue: Include Issue Name, Duration, Timing, Quality, Severity, Context, Progression, Previous Episodes, Impact on daily life, Associated Symptoms, and Medications",
+                "Each issue should be grouped with its related details (as bullet points)"
+            ]},
+            {"Past Medical History": [
+                "Contributing Factors: Past medical or surgical history",
+                "Social History: Lifestyle, work, stressors, habits",
+                "Family History: Any relevant family diagnoses",
+                "Exposure History: Environmental, occupational, infectious exposure",
+                "Immunization History: Mentioned vaccines",
+                "Other: Any other subjective info"
+            ]},
+            {"Objective": [
+                "Vital Signs: BP, HR, T, O2, etc.",
+                "Examination Findings: Physical or mental exam findings",
+                "Investigations With Results: Completed test results"
+            ]},
+            {"Assessment and Plan": [
+                "Per issue: Match issue name from Subjective",
+                "Include: Assessment (diagnosis), Differential Diagnosis, Treatment Planned, Investigations Planned, Referrals"
+            ]}
+        ]
+    },
+    "cardiology_letter": {
+        "display_name": "Cardiology Consult Letter",
+        "structure": [
+            {"Reason for Referral": "Describe the explicit reason for referral including presenting cardiac symptoms, abnormal tests, or referring physician concerns. Write in paragraph format."},
+            {"History of Presenting Complaints": "Summarize current cardiac-related symptoms with duration, frequency, and associated features like dyspnea, fatigue, or syncope. Use paragraph format."},
+            {"Past Medical History": "Include relevant cardiac or systemic medical conditions, especially hypertension, diabetes, stroke, heart failure, etc. Use paragraph format."},
+            {"Family History": "Mention family history of heart conditions like coronary artery disease, sudden cardiac death, cardiomyopathy, or arrhythmias. Use paragraph format."},
+            {"Social History": "Summarize lifestyle habits relevant to cardiac health, including smoking, alcohol, drug use, exercise, and stress. Use paragraph format."},
+            {"Medications": "List all current medications with dosage and frequency, especially cardiac medications and relevant supplements."},
+            {"Examinations": "Summarize physical exam findings including vitals (BP, HR), heart sounds, murmurs, JVP, edema, respiratory status. Structure with subheadings as needed."},
+            {"Investigations": "Include results from ECG, ECHO, blood tests, Holter monitor, imaging, etc. Format as concise interpretation-style paragraph."},
+            {"Assessment and Evaluation": "Interpret findings with possible diagnosis, severity of cardiac condition, or abnormalities. Paragraph format."},
+            {"Plan and Recommendation": "Provide next steps including tests, treatment changes, lifestyle advice, follow-up, and referrals. Use subheadings where relevant, in paragraph format."}
+        ]
+    },
 
-@app.get("/valid-templates")
-def get_valid_templates():
-    return JSONResponse(content={
-        "default": "SOAP Detailed",
-        "templates": template_display_map
-    })
+
+}
+
+
+@app.get("/template-structures")
+def get_all_template_structures():
+    operation = "GET_ALL_TEMPLATE_STRUCTURES"
+    try:
+        main_logger.info(f"[{operation}] Request received to fetch all template structures.")
+        
+        result = []
+        for template_type, config in template_structures_verbose.items():
+            result.append({
+                "template_type": template_type,
+                "display_name": config.get("display_name"),
+                "structure": config.get("structure")
+            })
+
+        main_logger.info(f"[{operation}] Successfully fetched {len(result)} templates.")
+        return JSONResponse(content=result)
+    
+    except Exception as e:
+        error_logger.exception(f"[{operation}] Failed to retrieve template structures: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
 ############### STRESS TEST ################
 
