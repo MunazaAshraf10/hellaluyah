@@ -1,6 +1,7 @@
 from fastapi import FastAPI, File, UploadFile, Form, WebSocket, WebSocketDisconnect, BackgroundTasks, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 import shutil
+from fpdf import FPDF
 from fastapi import Query, HTTPException
 from logging.handlers import RotatingFileHandler
 import tempfile
@@ -2060,12 +2061,14 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
                 Do not use hardcoded dates or assumed years unless explicitly stated in the transcription.
                 Verify date calculations to prevent errors, such as incorrect years or misaligned days.
             {preservation_instructions} {grammar_instructions}
+            Use the formatting instructions given below:
+            {formatting_instructions}
             Follow the structured guidelines below for each section of the report:
 
-            1. Reason For Visit:
+            ##1. Reason For Visit:
             - describe the reason for visit
 
-            2. Cardiac Risk Factors:
+            ##2. Cardiac Risk Factors:
             - List under the heading "CARDIAC RISK FACTORS" in the following order: Increased BMI, Hypertension, Dyslipidemia, Diabetes mellitus, Smoker, Ex-smoker, Family history of atherosclerotic disease in first-degree relatives.
             - For each risk factor, use verbatim text from contextual notes if available, updating only with new or differing information from the transcript.
             - If no information is provided in the transcript or context, ignore that stuff.
@@ -2073,7 +2076,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             - For Ex-smoker, include only if the patient is not currently smoking. State the year quit and whether they quit remotely (e.g., "quit remotely in 2015") if mentioned. Omit this section if the patient is a current smoker.
             - For Family history of atherosclerotic disease, specify if the patient’s mother, father, sister, brother, or child had a myocardial infarction, coronary angioplasty, coronary stenting, coronary bypass, peripheral arterial procedure, or stroke prior to age 55 (men) or 65 (women), as mentioned in the transcript or context.
 
-            3. Cardiac History:
+            ##3. Cardiac History:
             - List under the heading "CARDIAC HISTORY" all cardiac diagnoses in the following order, if mentioned: heart failure (HFpEF or HFrEF), cardiomyopathy, arrhythmias (atrial fibrillation, atrial flutter, SVT, VT, AV block, heart block), devices (pacemakers, ICDs), valvular disease, endocarditis, pericarditis, tamponade, myocarditis, coronary disease.
             - Use verbatim text from contextual notes, updating only with new or differing transcript information.
             - For heart failure, specify HFpEF or HFrEF and include ICD implantation details (date and model) if mentioned.
@@ -2083,12 +2086,12 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             - For coronary disease, summarize previous angiograms, coronary anatomy, and interventions (angioplasty, stenting, CABG) with graft details and dates if mentioned.
             - Omit this section entirely if no cardiac history is mentioned in the transcript or context.
 
-            4. Other Medical History:
+            ##4. Other Medical History:
             - List under the heading "OTHER MEDICAL HISTORY" all non-cardiac diagnoses and previous surgeries with associated years if mentioned.
             - Use verbatim text from contextual notes, updating only with new or differing transcript information.
             - Ignore no non-cardiac medical history is mentioned in the transcript or context.
 
-            5. Current Medications:
+            ##5. Current Medications:
             - List under the heading "CURRENT MEDICATIONS" in the following subcategories, each on a single line:
                 - Antithrombotic Therapy: Include aspirin, clopidogrel, ticagrelor, prasugrel, apixaban, rivaroxaban, dabigatran, edoxaban, warfarin.
                 - Antihypertensives: Include ACE inhibitors, ARBs, beta blockers, calcium channel blockers, alpha blockers, nitrates, diuretics (excluding furosemide, e.g., HCTZ, chlorthalidone, indapamide).
@@ -2099,12 +2102,12 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             - Use verbatim text from contextual notes, updating only with new or differing transcript information.
             - Ignore each subcategory if no medications are mentioned.
 
-            6. Allergies and Intolerances:
+            ##6. Allergies and Intolerances:
             - List under the heading "ALLERGIES AND INTOLERANCES" in sentence format, separated by commas, with reactions in parentheses if mentioned (e.g., "penicillin (rash), sulfa drugs (hives)").
             - Use verbatim text from contextual notes, updating only with new or differing transcript information.
             - Ignore if no allergies or intolerances are mentioned.
 
-            7. Social History:
+            ##7. Social History:
             - List under the heading "SOCIAL HISTORY" in a short-paragraph narrative form.
             - Include living situation, spousal arrangements, number of children, working arrangements, retirement status, smoking status, alcohol use, illicit or recreational drug use, and private drug/health plan status, if mentioned.
             - For smoking, write "Smoking history as above" if the patient smokes or is an ex-smoker; otherwise, write "Non-smoker."
@@ -2113,13 +2116,13 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             - Use verbatim text from contextual notes, updating only with new or differing transcript information.
             - Ignore this subheading if no social history is mentioned.
 
-            8. History:
+            ##8. History:
             - List under the heading "HISTORY" in narrative paragraph form, detailing all reasons for the current visit, chief complaints, and a comprehensive history of presenting illness.
             - Include mentioned negatives from exams and symptoms, as well as details on physical activities and exercise regimens, if mentioned.
             - Only include information explicitly stated in the transcript or context.
             - End with: "Review of systems is otherwise non-contributory."
 
-            9. Physical Examination:
+            ##9. Physical Examination:
             - List under the heading "PHYSICAL EXAMINATION" in a short-paragraph narrative form.
             - Include vital signs (blood pressure, heart rate, oxygen saturation), cardiac examination, respiratory examination, peripheral edema, and other exam insights only if explicitly mentioned in the transcript or context.
             - If cardiac exam is not mentioned or normal, write: "Precordial examination was unremarkable with no significant heaves, thrills or pulsations. Heart sounds were normal with no significant murmurs, rubs, or gallops."
@@ -2127,7 +2130,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             - If peripheral edema is not mentioned or normal, write: "No peripheral edema."
             - Omit other physical exam insights if not mentioned.
 
-            10. Investigations:
+            ##10. Investigations:
                 - List under the heading "INVESTIGATIONS" in the following subcategories, each on a single line with findings and dates in parentheses followed by a colon:
                 - Laboratory investigations: List CBC, electrolytes, creatinine with GFR, troponins, NTpBNP or BNP level, A1c, lipids, and other labs in that order, if mentioned.
                 - ECGs: List ECG findings and dates.
@@ -2142,7 +2145,7 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
                 - Use verbatim text from contextual notes, updating only with new or differing transcript information.
                 - Ignore each subcategory if no findings are mentioned.
 
-            11. Summary:
+            ##11. Summary:
                 - List under the heading "SUMMARY" in a cohesive narrative paragraph.
                 - Start with: "[patient name] is a pleasant [age] year old [gender] that was seen today for cardiac assessment."
                 - Include: "Cardiac risk factors include [list risk factors]" if mentioned in the transcript or context.
@@ -2150,14 +2153,14 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
                 - Omit risk factors or summary details if not mentioned.
                 [make it in a paragraph form]
 
-            12. Assessment/Plan:
+            ##12. Assessment/Plan:
                 - List under the heading "ASSESSMENT/PLAN" for each medical issue, structured as:
                 - #[number] [Condition]
                 - Assessment: [Current assessment of the condition, drawn from context and transcript]
                 - Plan: [Management plan, including investigations, follow-up, and reasoning for the plan, drawn from context and transcript. Include counselling details if mentioned.]
                 - Number each issue sequentially (e.g., #1, #2) and ensure all information is explicitly mentioned in the transcript or context.
 
-            13. Follow-Up:
+            ##13. Follow-Up:
                 - List under the heading "FOLLOW-UP" any follow-up plans and time frames explicitly mentioned in the transcript.
                 - If no time frame is specified, write: "Will follow-up in due course, pending investigations, or sooner should the need arise."
 
@@ -12462,6 +12465,8 @@ template_display_map = {
     "progress_note": "Progress Note",
     "detailed_dietician_initial_assessment": "Detailed Dietician Initial Assessment"
 }
+
+
 template_structures_verbose = {
     "cardiology_consult": {
         "display_name": "Cardiology Consult",
@@ -13247,6 +13252,160 @@ def get_all_template_structures():
     except Exception as e:
         error_logger.exception(f"[{operation}] Failed to retrieve template structures: {str(e)}")
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
+
+
+
+
+async def get_transcription_and_reports(transcript_id: str):
+    try:
+        main_logger.info(f"[FETCH] Fetching transcription for ID: {transcript_id}")
+        transcripts_table = dynamodb.Table('transcripts')
+        transcript_response = transcripts_table.get_item(Key={"id": transcript_id})
+
+        if 'Item' not in transcript_response:
+            return None
+
+        transcription = transcript_response['Item']
+        transcription['transcript'] = decrypt_data(transcription['transcript'])
+
+        # Get all associated reports
+        reports_table = dynamodb.Table('reports')
+        reports = await dynamodb_scan_all(
+            reports_table,
+            FilterExpression=Attr('transcript_id').eq(transcript_id)
+        )
+
+        decrypted_reports = []
+        for report in reports:
+            raw_data = decrypt_data(report['gpt_response'])
+            report['gpt_response'] = raw_data.decode('utf-8', errors='replace') if isinstance(raw_data, bytes) else raw_data
+            report['formatted_report'] = report['gpt_response']  # fallback if formatted missing
+            decrypted_reports.append(report)
+
+        return {
+            "transcription": transcription,
+            "reports": decrypted_reports
+        }
+
+    except Exception as e:
+        error_logger.error(f"[FETCH] Error getting transcription and reports: {e}", exc_info=True)
+        return None
+
+
+async def get_report_by_id(report_id: str):
+    try:
+        main_logger.info(f"[FETCH] Fetching report by ID: {report_id}")
+        table = dynamodb.Table('reports')
+        response = table.get_item(Key={"id": report_id})
+
+        if 'Item' in response:
+            item = response['Item']
+            item['gpt_response'] = decrypt_data(item['gpt_response'])
+            item['formatted_report'] = item['gpt_response']  # fallback if formatted missing
+            return item
+        else:
+            return None
+    except Exception as e:
+        error_logger.error(f"[FETCH] Error getting report by ID: {e}", exc_info=True)
+        return None
+
+
+class PDFGenerator(FPDF):
+    def __init__(self):
+        super().__init__()
+        self.add_page()
+        self.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+        self.set_font("DejaVu", size=12)
+        self.set_auto_page_break(auto=True, margin=15)
+
+    def add_title(self, title):
+        self.set_font("DejaVu", 'B', 16)
+        self.cell(200, 10, txt=title, ln=True)
+        self.ln(4)  # 2-line space
+        self.set_font("DejaVu", size=12)
+
+    def add_subtitle(self, title):
+        self.set_font("DejaVu", 'B', 14)
+        self.cell(200, 10, txt=title, ln=True)
+        self.ln(2)  # 1-line space
+        self.set_font("DejaVu", size=12)
+
+    def add_multicell(self, text):
+        if isinstance(text, bytes):
+            text = text.decode('utf-8', errors='replace')
+        self.multi_cell(0, 8, text.encode('latin-1', 'replace').decode('latin-1'))
+
+
+@app.get("/download-report")
+async def download_pdf_report(
+    transcript_id: Optional[str] = Query(None),
+    report_id: Optional[str] = Query(None)
+):
+    if not transcript_id and not report_id:
+        return JSONResponse({"error": "transcript_id or report_id is required"}, status_code=400)
+
+    pdf = PDFGenerator()
+
+    try:
+        if transcript_id:
+            data = await get_transcription_and_reports(transcript_id)
+            if not data:
+                return JSONResponse({"error": "Transcription not found"}, status_code=404)
+
+            transcription = data["transcription"]
+            reports = data["reports"]
+
+            # TRANSCRIPTION
+            pdf.add_title("Transcription")
+            transcript_text = transcription.get("transcript", "")
+            try:
+                transcript_json = json.loads(transcript_text)
+            except json.JSONDecodeError:
+                transcript_json = eval(transcript_text)
+
+            for entry in transcript_json.get("conversation", []):
+                speaker = entry.get("speaker", "Unknown")
+                text = entry.get("text", "")
+                pdf.add_multicell(f"{speaker}:\n{text}\n")
+
+            # REPORTS
+            pdf.add_title("Reports")
+            for report in reports:
+                display_name = template_display_map.get(report["template_type"], report["template_type"])
+                pdf.add_subtitle(display_name)
+
+                # Include full report details
+                pdf.add_multicell(f"Created At: {report.get('created_at', '-')}")
+                pdf.add_multicell(f"Status: {report.get('status', '-')}")
+                pdf.add_multicell("\nContent:\n")
+                pdf.add_multicell(report.get("formatted_report") or report.get("gpt_response", ""))
+                pdf.ln(4)
+
+        elif report_id:
+            report = await get_report_by_id(report_id)
+            if not report:
+                return JSONResponse({"error": "Report not found"}, status_code=404)
+
+            pdf.add_title("Report")
+            display_name = template_display_map.get(report["template_type"], report["template_type"])
+            pdf.add_subtitle(display_name)
+
+            pdf.add_multicell(f"Created At: {report.get('created_at', '-')}")
+            pdf.add_multicell(f"Status: {report.get('status', '-')}")
+            pdf.add_multicell("\nContent:\n")
+            pdf.add_multicell(report.get("formatted_report") or report.get("gpt_response", ""))
+
+        # Output PDF
+        filename = f"report_{transcript_id or report_id}.pdf"
+        file_path = f"/tmp/{filename}"
+        pdf.output(file_path)
+
+        return FileResponse(path=file_path, media_type='application/pdf', filename=filename)
+
+    except Exception as e:
+        from app.logger import error_logger
+        error_logger.error(f"[PDF] Generation failed: {e}", exc_info=True)
+        return JSONResponse({"error": f"PDF generation failed: {str(e)}"}, status_code=500)
 
 ############### STRESS TEST ################
 
