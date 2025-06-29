@@ -20,3 +20,4 @@ websockets>=15.0.1
 gunicorn
 cryptography == 45.0.2
 pydub == 0.25.1
+fpdf == 1.7.2
