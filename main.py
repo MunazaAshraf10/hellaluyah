@@ -335,6 +335,7 @@ async def live_transcription_endpoint(websocket: WebSocket):
         session_data["transcript_id"] = transcript_id
         session_data["no_report"] = False
         session_data["closed"] = False
+        session_data["disconnected"] = False 
         manager.update_session_data(client_id, session_data)
 
         audio_buffer = bytearray()
@@ -420,6 +421,10 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
 
     except WebSocketDisconnect:
         main_logger.warning(f"[{client_id}] WebSocket disconnected during audio stream")
+        session_data = manager.get_session_data(client_id)
+        session_data["disconnected"] = True
+        manager.update_session_data(client_id, session_data)
+        return
     except Exception as e:
         error_logger.error(f"[{client_id}] Audio stream error: {str(e)}\n{traceback.format_exc()}")
 
@@ -517,6 +522,8 @@ async def process_transcription_results(deepgram_socket, websocket, client_id, a
 
         # Always trigger report if closed and not disabled
         session_data = manager.get_session_data(client_id)
+        # Always save the transcript
+        main_logger.info(f"[{client_id}] Transcription saved for transcript_id: {transcript_id} (disconnected={session_data.get('disconnected')}, closed={session_data.get('closed')})")
         if session_data.get("closed") and not session_data.get("no_report", False):
             transcript_id = session_data.get("transcript_id")
             template_type = session_data.get("template_type", "new_soap_note")
