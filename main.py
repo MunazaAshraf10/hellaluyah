@@ -309,6 +309,7 @@ async def root():
     return {"message": "Welcome to the speech transcription and GPT-4 processing service!"}
 
 
+
 @app.websocket("/ws/live-transcription")
 async def live_transcription_endpoint(websocket: WebSocket):
     client_id = str(uuid.uuid4())
