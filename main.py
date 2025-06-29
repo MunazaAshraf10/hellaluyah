@@ -351,6 +351,9 @@ async def live_transcription_endpoint(websocket: WebSocket):
             deepgram_url,
             additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
         )
+        # 🔽 ADD THIS RIGHT AFTER
+        session_data["deepgram_socket"] = deepgram_socket
+        manager.update_session_data(client_id, session_data)
 
         audio_task = asyncio.create_task(process_audio_stream(websocket, deepgram_socket, audio_buffer, client_id))
         transcript_task = asyncio.create_task(process_transcription_results(deepgram_socket, websocket, client_id, audio_buffer))
@@ -385,7 +388,13 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
                     continue
 
                 audio_buffer.extend(data)
-                await deepgram_socket.send(data)
+                # Send audio to the current Deepgram socket
+                deepgram_socket = session_data.get("deepgram_socket")
+                if deepgram_socket:
+                    try:
+                        await deepgram_socket.send(data)
+                    except Exception as e:
+                        error_logger.error(f"[{client_id}] Error sending audio to Deepgram: {e}")
 
             elif "text" in message:
                 try:
@@ -411,10 +420,43 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
                     elif msg_type == "PauseStream":
                         session_data["paused"] = True
                         manager.update_session_data(client_id, session_data)
+                        old_socket = session_data.get("deepgram_socket")
+                        if old_socket:
+                            try:
+                                await old_socket.close()
+                                main_logger.info(f"[{client_id}] Deepgram socket closed on pause")
+                            except Exception as e:
+                                error_logger.error(f"[{client_id}] Failed to close Deepgram on pause: {e}")
+                            session_data["deepgram_socket"] = None
+                            manager.update_session_data(client_id, session_data)
 
                     elif msg_type == "ResumeStream":
                         session_data["paused"] = False
-                        manager.update_session_data(client_id, session_data)
+
+                        try:
+                            deepgram_url = (
+                                "wss://api.deepgram.com/v1/listen"
+                                "?encoding=linear16&sample_rate=16000&channels=1"
+                                "&model=nova-2-medical&language=en&diarize=true"
+                                "&punctuate=true&smart_format=true"
+                            )
+
+                            new_socket = await websockets.connect(
+                                deepgram_url,
+                                additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
+                            )
+
+                            session_data["deepgram_socket"] = new_socket
+                            manager.update_session_data(client_id, session_data)
+
+                            asyncio.create_task(
+                                process_transcription_results(new_socket, websocket, client_id, audio_buffer)
+                            )
+
+                            main_logger.info(f"[{client_id}] Reconnected Deepgram on ResumeStream")
+
+                        except Exception as e:
+                            error_logger.error(f"[{client_id}] Failed to reconnect Deepgram on resume: {e}")
 
                 except json.JSONDecodeError:
                     error_logger.warning(f"[{client_id}] Received non-JSON text message, ignoring.")
