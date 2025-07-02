@@ -21,3 +21,5 @@ gunicorn
 cryptography == 45.0.2
 pydub == 0.25.1
 fpdf == 1.7.2
+jinja2 == 3.1.6
+pdfkit == 1.0.0

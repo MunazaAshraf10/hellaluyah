@@ -13262,8 +13262,6 @@ def get_all_template_structures():
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
 
-
-
 async def get_transcription_and_reports(transcript_id: str):
     try:
         main_logger.info(f"[FETCH] Fetching transcription for ID: {transcript_id}")
@@ -13318,102 +13316,75 @@ async def get_report_by_id(report_id: str):
         return None
 
 
-class PDFGenerator(FPDF):
-    def __init__(self):
-        super().__init__()
-        self.add_page()
-        self.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
-        self.set_font("DejaVu", size=12)
-        self.set_auto_page_break(auto=True, margin=15)
 
-    def add_title(self, title):
-        self.set_font("DejaVu", 'B', 16)
-        self.cell(200, 10, txt=title, ln=True)
-        self.ln(4)  # 2-line space
-        self.set_font("DejaVu", size=12)
-
-    def add_subtitle(self, title):
-        self.set_font("DejaVu", 'B', 14)
-        self.cell(200, 10, txt=title, ln=True)
-        self.ln(2)  # 1-line space
-        self.set_font("DejaVu", size=12)
-
-    def add_multicell(self, text):
-        if isinstance(text, bytes):
-            text = text.decode('utf-8', errors='replace')
-        self.multi_cell(0, 8, text.encode('latin-1', 'replace').decode('latin-1'))
+from jinja2 import Environment, FileSystemLoader
+import pdfkit
+# Jinja2 setup
+env = Environment(loader=FileSystemLoader("templates"))
 
 
-@app.get("/download-report")
-async def download_pdf_report(
-    transcript_id: Optional[str] = Query(None),
-    report_id: Optional[str] = Query(None)
+# Markdown to HTML converter
+def convert_report_to_html(raw_text: str) -> str:
+    if isinstance(raw_text, bytes):
+        raw_text = raw_text.decode('utf-8', errors='replace')
+        
+    lines = raw_text.strip().split('\n')
+    html_output = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            html_output.append(f"<h3>{stripped[3:]}</h3>")
+        elif stripped.startswith("# "):
+            html_output.append(f"<h2>{stripped[2:]}</h2>")
+        elif stripped.startswith("•") or stripped.startswith("- "):
+            html_output.append(f"<ul><li>{stripped.lstrip('•- ').strip()}</li></ul>")
+        elif stripped:
+            html_output.append(f"<p>{stripped}</p>")
+    return "\n".join(html_output)
+
+
+# Your API endpoint
+@app.get("/generate-pdf-from-report/{report_id}")
+async def generate_pdf_from_report(
+    report_id: str,
+    session_name: str = Query(default="Medical Consultation"),
+    session_date: str = Query(default=datetime.now().strftime("%d/%m/%Y")),
+    session_time: str = Query(default=datetime.now().strftime("%H:%M"))
 ):
-    if not transcript_id and not report_id:
-        return JSONResponse({"error": "transcript_id or report_id is required"}, status_code=400)
-
-    pdf = PDFGenerator()
-
     try:
-        if transcript_id:
-            data = await get_transcription_and_reports(transcript_id)
-            if not data:
-                return JSONResponse({"error": "Transcription not found"}, status_code=404)
+        report = await get_report_by_id(report_id)
+        if not report:
+            error_logger.error(f"[NOT FOUND] Report ID {report_id} not found.")
+            return {"error": "Report not found"}
 
-            transcription = data["transcription"]
-            reports = data["reports"]
+        report_name = template_display_map.get(report.get("template_type", ""), "Report")
+        formatted_html = convert_report_to_html(report.get("formatted_report", ""))
 
-            # TRANSCRIPTION
-            pdf.add_title("Transcription")
-            transcript_text = transcription.get("transcript", "")
-            try:
-                transcript_json = json.loads(transcript_text)
-            except json.JSONDecodeError:
-                transcript_json = eval(transcript_text)
+        logo_path = os.path.abspath("templates/logo.svg").replace("\\", "/")
+        logo_url = f"file:///{logo_path}"
 
-            for entry in transcript_json.get("conversation", []):
-                speaker = entry.get("speaker", "Unknown")
-                text = entry.get("text", "")
-                pdf.add_multicell(f"{speaker}:\n{text}\n")
+        rendered_html = env.get_template("medtalk_template.html").render(
+            session_name=session_name,
+            session_date=session_date,
+            session_time=session_time,
+            report_name=report_name,
+            reports_html=formatted_html,
+            logo_path=logo_url,
+        )
 
-            # REPORTS
-            pdf.add_title("Reports")
-            for report in reports:
-                display_name = template_display_map.get(report["template_type"], report["template_type"])
-                pdf.add_subtitle(display_name)
+        os.makedirs("generated_reports", exist_ok=True)
+        filename = f"report_{uuid.uuid4().hex}.pdf"
+        output_path = os.path.join("generated_reports", filename)
 
-                # Include full report details
-                pdf.add_multicell(f"Created At: {report.get('created_at', '-')}")
-                pdf.add_multicell(f"Status: {report.get('status', '-')}")
-                pdf.add_multicell("\nContent:\n")
-                pdf.add_multicell(report.get("formatted_report") or report.get("gpt_response", ""))
-                pdf.ln(4)
+        # PDF conversion
+        pdfkit.from_string(rendered_html, output_path, options={"enable-local-file-access": True})
 
-        elif report_id:
-            report = await get_report_by_id(report_id)
-            if not report:
-                return JSONResponse({"error": "Report not found"}, status_code=404)
-
-            pdf.add_title("Report")
-            display_name = template_display_map.get(report["template_type"], report["template_type"])
-            pdf.add_subtitle(display_name)
-
-            pdf.add_multicell(f"Created At: {report.get('created_at', '-')}")
-            pdf.add_multicell(f"Status: {report.get('status', '-')}")
-            pdf.add_multicell("\nContent:\n")
-            pdf.add_multicell(report.get("formatted_report") or report.get("gpt_response", ""))
-
-        # Output PDF
-        filename = f"report_{transcript_id or report_id}.pdf"
-        file_path = f"/tmp/{filename}"
-        pdf.output(file_path)
-
-        return FileResponse(path=file_path, media_type='application/pdf', filename=filename)
+        main_logger.info(f"PDF successfully generated for report {report_id} at {output_path}")
+        return FileResponse(output_path, filename="medtalk_report.pdf", media_type="application/pdf")
 
     except Exception as e:
-        from app.logger import error_logger
-        error_logger.error(f"[PDF] Generation failed: {e}", exc_info=True)
-        return JSONResponse({"error": f"PDF generation failed: {str(e)}"}, status_code=500)
+        error_logger.exception(f"[ERROR] PDF generation failed for report_id={report_id}")
+        return {"error": str(e)}
 
 ############### STRESS TEST ################
 
