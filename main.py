@@ -1763,7 +1763,7 @@ async def get_report_history():
         )
 
 @log_execution_time
-async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, str]:
+async def fetch_prompts(transcription: dict, template_type: str, feedback=None, medicine_vocab=None) -> tuple[str, str]:
     """
     Generate GPT response based on a transcription and template type, streaming the output.
     Args:
@@ -5795,24 +5795,48 @@ async def fetch_prompts(transcription: dict, template_type: str) -> tuple[str, s
             {date_instructions}
             """
 
-        
+        def add_context_sections(user_instructions):
+            if feedback and feedback.strip():
+                user_instructions += f"\n\nAdditional feedback from user:\n{feedback.strip()}\n"
+            if medicine_vocab and medicine_vocab.strip():
+                user_instructions += (
+                    "\n\nMedicine Vocabulary Reference:\n"
+                    "The following medicine names, alternate names, or abbreviations may appear in the transcript.\n"
+                    "Use these names/terms exactly as provided if they appear in the conversation.\n"
+                    f"{medicine_vocab.strip()}\n"
+                )
+            return user_instructions
+
+        user_instructions = add_context_sections(user_instructions)
         return user_instructions, system_message
 
     except Exception as e:
         main_logger.error(f"[OP-{operation_id}] Error generating prompts: {str(e)}", exc_info=True)
         raise RuntimeError(f"Error generating prompts: {str(e)}")
 
-async def stream_openai_report(transcription: dict, template_type: str) -> AsyncGenerator[str, None]:
+async def stream_openai_report(
+    transcription: dict,
+    template_type: str,
+    feedback: str = None,
+    medicine_vocab: str = None
+) -> AsyncGenerator[str, None]:
     """
     Generate and stream OpenAI response for the given transcription and template type.
     """
     operation_id = str(uuid.uuid4())[:8]
     try:
         main_logger.info(f"[OP-{operation_id}] Preparing prompts for template: {template_type}")
-        user_prompt, system_message = await fetch_prompts(transcription, template_type)
-       
+
+        # Use your prompt builder with new params
+        user_prompt, system_message = await fetch_prompts(
+        transcription,
+        template_type,
+        feedback=feedback,
+        medicine_vocab=medicine_vocab
+    )
+
         main_logger.info(f"[OP-{operation_id}] Initiating OpenAI streaming for template: {template_type}")
-        stream = await clients.chat.completions.create(  # No await here; it's an async generator
+        stream = await clients.chat.completions.create(
             model="gpt-4.1",
             messages=[
                 {"role": "system", "content": system_message},
@@ -5821,7 +5845,7 @@ async def stream_openai_report(transcription: dict, template_type: str) -> Async
             temperature=0.3,
             stream=True,
         )
-        async for chunk in stream:  # Correctly iterate over the stream
+        async for chunk in stream:
             content = chunk.choices[0].delta.content or ""
             yield content
         
@@ -5875,11 +5899,14 @@ async def save_report_background(
             report_id,
         )
 
+
 @app.post("/live_reporting")
 @log_execution_time
 async def live_reports(
     transcript_id: str = Form(...),
     template_type: str = Form("new_soap_note"),
+    feedback: str = Form(None),  # new, optional
+    medicine_vocab: str = Form(None),  # new, pass as JSON string if complex
     background_tasks: BackgroundTasks = None
 ):
     """
@@ -5985,7 +6012,7 @@ async def live_reports(
             main_logger.info(f"[LIVE_REPORTING] Streaming initiated | report_id={report_id}")
             
             try:
-                async for chunk in stream_openai_report(transcription, template_type):
+                async for chunk in stream_openai_report(transcription, template_type, feedback=feedback,medicine_vocab=medicine_vocab ):
                     gpt_response += chunk
                     yield chunk
             except Exception as e:
