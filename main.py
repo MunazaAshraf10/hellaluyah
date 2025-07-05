@@ -308,7 +308,79 @@ manager = ConnectionManager()
 async def root():
     return {"message": "Welcome to the speech transcription and GPT-4 processing service!"}
 
+DEEPGRAM_LANGUAGES = {
+    "Bulgarian": ["bg"],
+    "Catalan": ["ca"],
+    "Chinese (Mandarin, Simplified)": ["zh", "zh-CN", "zh-Hans"],
+    "Chinese (Mandarin, Traditional)": ["zh-TW", "zh-Hant"],
+    "Chinese (Cantonese, Traditional)": ["zh-HK"],
+    "Czech": ["cs"],
+    "Danish": ["da", "da-DK"],
+    "Dutch": ["nl"],
+    "English": ["en", "en-US", "en-AU", "en-GB", "en-NZ", "en-IN"],
+    "Estonian": ["et"],
+    "Finnish": ["fi"],
+    "Flemish": ["nl-BE"],
+    "French": ["fr", "fr-CA"],
+    "German": ["de"],
+    "German (Switzerland)": ["de-CH"],
+    "Greek": ["el"],
+    "Hindi": ["hi"],
+    "Hungarian": ["hu"],
+    "Indonesian": ["id"],
+    "Italian": ["it"],
+    "Japanese": ["ja"],
+    "Korean": ["ko", "ko-KR"],
+    "Latvian": ["lv"],
+    "Lithuanian": ["lt"],
+    "Malay": ["ms"],
+    "Norwegian": ["no"],
+    "Polish": ["pl"],
+    "Portuguese": ["pt", "pt-BR", "pt-PT"],
+    "Romanian": ["ro"],
+    "Russian": ["ru"],
+    "Slovak": ["sk"],
+    "Spanish": ["es", "es-419"],
+    "Swedish": ["sv", "sv-SE"],
+    "Thai": ["th", "th-TH"],
+    "Turkish": ["tr"],
+    "Ukrainian": ["uk"],
+    "Vietnamese": ["vi"],
+}
+SUPPORTED_LANG_CODES = [code.lower() for codes in DEEPGRAM_LANGUAGES.values() for code in codes]
 
+MULTILINGUAL_LANGUAGES = [
+    "English",
+    "Spanish",
+    "French",
+    "German",
+    "Hindi",
+    "Russian",
+    "Portuguese",
+    "Japanese",
+    "Italian",
+    "Dutch"
+]
+
+
+@app.get("/languages")
+def get_languages():
+    languages = [
+        {"language": lang, "codes": codes}
+        for lang, codes in DEEPGRAM_LANGUAGES.items()
+    ]
+    # Add the Multilingual entry
+    multi_entry = {
+        "language": "Multilingual",
+        "codes": ["multi"],
+        "supports": [
+            {"language": lang, "codes": DEEPGRAM_LANGUAGES[lang]}
+            for lang in MULTILINGUAL_LANGUAGES if lang in DEEPGRAM_LANGUAGES
+        ]
+    }
+    # Place multilingual entry at the end (or wherever you want)
+    languages.append(multi_entry)
+    return JSONResponse(content=languages)
 
 @app.websocket("/ws/live-transcription")
 async def live_transcription_endpoint(websocket: WebSocket):
@@ -326,6 +398,18 @@ async def live_transcription_endpoint(websocket: WebSocket):
         config = json.loads(config_msg)
         main_logger.info(f"[{client_id}] Config received: {config}")
 
+        language = config.get("language", "en").lower()
+        if language not in SUPPORTED_LANG_CODES:
+            await websocket.send_text(json.dumps({
+                "status": "error",
+                "message": (
+                    f"Language '{language}' is not supported. "
+                    "Supported values: " + ", ".join(SUPPORTED_LANG_CODES)
+                )
+            }))
+            await websocket.close()
+            return
+
         await websocket.send_text(json.dumps({
             "status": "ready",
             "message": "Ready to receive audio for real-time transcription",
@@ -337,16 +421,26 @@ async def live_transcription_endpoint(websocket: WebSocket):
         session_data["no_report"] = False
         session_data["closed"] = False
         session_data["disconnected"] = False 
+        session_data["language"] = language
         manager.update_session_data(client_id, session_data)
 
         audio_buffer = bytearray()
 
+        if language in {"en", "en-us"}:
+            model = "nova-2-medical"
+        elif language == "multi":
+            model = "nova-3"
+        else:
+            model = "nova-2"
+
         deepgram_url = (
-            "wss://api.deepgram.com/v1/listen"
-            "?encoding=linear16&sample_rate=16000&channels=1"
-            "&model=nova-2-medical&language=en&diarize=true"
-            "&punctuate=true&smart_format=true"
+            f"wss://api.deepgram.com/v1/listen"
+            f"?encoding=linear16&sample_rate=16000&channels=1"
+            f"&model={model}"
+            f"&language={language}"
+            f"&diarize=true&punctuate=true&smart_format=true"
         )
+
 
         deepgram_socket = await websockets.connect(
             deepgram_url,
@@ -429,7 +523,6 @@ async def process_audio_stream(websocket: WebSocket, deepgram_socket, audio_buff
     except Exception as e:
         error_logger.error(f"[{client_id}] Audio stream error: {str(e)}\n{traceback.format_exc()}")
 
-
 async def generate_report_background(transcript_id, template_type, client_id):
     try:
         main_logger.info(f"[{client_id}] (BG) Generating report for {template_type} with Transcript ID {transcript_id}")
@@ -473,7 +566,9 @@ async def process_transcription_results(deepgram_socket, websocket, client_id, a
 
                 try:
                     await websocket.send_text(json.dumps(message))
-                except RuntimeError:
+                except (RuntimeError, WebSocketDisconnect):
+                    # Optionally log it, then break/return to stop sending further
+                    main_logger.warning(f"[{client_id}] Tried to send to closed WebSocket, breaking send loop.")
                     break
 
                 if data.get("type") == "Results":
@@ -492,11 +587,22 @@ async def process_transcription_results(deepgram_socket, websocket, client_id, a
         session_data = manager.get_session_data(client_id)
         transcript_id = session_data["transcript_id"]
 
+        
+        # Fetch what you have so far, fallback if new session
         audio_info = await save_audio_to_s3(bytes(audio_buffer))
+        # Fetch what you have so far, fallback if new session
         transcript_data = session_data.get("transcription", {
-            "conversation": [], "metadata": {"duration": 0, "channels": 1}
+            "conversation": [],
+            "metadata": {}
         })
 
+        # Add or update metadata fields
+        transcript_data["metadata"].update({
+            "duration": session_data.get("current_time_offset", 0),
+            "channels": 1,
+            "current_date": datetime.now().strftime("%m/%d/%Y"),
+            "language": session_data.get("language", "en")
+        })
         await save_transcript_to_dynamodb(
             transcript_data,
             audio_info,
@@ -1796,7 +1902,9 @@ async def fetch_prompts(transcription: dict, template_type: str, feedback=None, 
         current_date = None
         if "metadata" in transcription and "current_date" in transcription["metadata"]:
             current_date = transcription["metadata"]["current_date"]
-                
+        
+        language = transcription.get("metadata", {}).get("language", "en")
+        
         DATE_INSTRUCTIONS = """
             Date Handling Instructions:
             - Use {reference_date} as the reference date for all temporal expressions in the transcription.
@@ -5804,6 +5912,12 @@ async def fetch_prompts(transcription: dict, template_type: str, feedback=None, 
                     "The following medicine names, alternate names, or abbreviations may appear in the transcript.\n"
                     "Use these names/terms exactly as provided if they appear in the conversation.\n"
                     f"{medicine_vocab.strip()}\n"
+                )
+            if language and language.strip():
+                user_instructions += (
+                    f"\n\nLanguage Instruction:\n"
+                    f"Write the final report in the following language: {language.strip()}.\n"
+                    "Use correct medical and professional terminology in this language."
                 )
             return user_instructions
 
